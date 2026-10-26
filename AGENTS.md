@@ -49,6 +49,9 @@ npm run demo    # ASCII 地图 + 示例题目，肉眼检查生成
   的 sprites.ts 生成即可，渲染层的 drawSprite 通路都还在
 - [x] 试玩反馈三修：AABB 碰撞防穿模、全页手势锁定防滑出、朝向箭头＋
   挖土目标金框高亮＋自动转向（细节见 DESIGN.md 美术定调段）
+- [x] v2 美术定版（gami 亲制，`assets/reference/v2/`）：`tools/slice_assets_v2.py`
+  切 31 张精灵（边框中位数取背景色＋最大连通域清理＋个别精灵收紧容差），
+  构建重新内联打包；地块调小 TILE=36/ROW_H=31、移速 4.0；NPC 改梅婆婆 May
 - [ ] 下一步：真机试玩反馈后调手感数值（移动速度、挖掘时长、镜头），再搭 Cocos
   工程骨架，把 web 原型的视图层移植过去（core 不动；精灵改走图集，不再 base64）
 - [ ] 词库扩充：tier2+ 数据文件（格式同 `core/vocab.ts` 的 WordEntry）

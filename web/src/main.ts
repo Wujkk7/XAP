@@ -16,8 +16,8 @@ import {
 import type { GameSave } from "../../core/save.ts";
 
 // ---------- constants ----------
-const TILE = 46; // px, top-face size
-const ROW_H = 40; // px per row (squashed for the oblique view)
+const TILE = 36; // px, top-face size (smaller tiles: see more of the world)
+const ROW_H = 31; // px per row (squashed for the oblique view)
 const FACE = 11; // px fake height of a block's front face
 const SAVE_KEY = "xap-save-v1";
 const SEED_STRING = "xap-world-1";
@@ -254,10 +254,10 @@ function actButton() { descendOrAct(); }
 
 // ---------- NPC (village sample) ----------
 const NPC_LINES = [
-  { name: "老矿工 Tom", en: "Hello! I am Tom. Dig deep, find gold!", zh: "你好！我是 Tom。往深挖，能找到金子！" },
-  { name: "老矿工 Tom", en: "A chest needs a word. The word is the key.", zh: "宝箱需要一个单词。单词就是钥匙。" },
-  { name: "老矿工 Tom", en: "Wrong word? No fear. It sleeps under the stone.", zh: "答错词？别怕。它睡在石头下面等你。" },
-  { name: "老矿工 Tom", en: "Trees give wood. Wood makes good tools.", zh: "树给木头。木头能做好工具。" },
+  { name: "梅婆婆 May", en: "Hello! I am May. Dig deep, find gold!", zh: "你好！我是梅婆婆。往深挖，能找到金子！" },
+  { name: "梅婆婆 May", en: "A chest needs a word. The word is the key.", zh: "宝箱需要一个单词。单词就是钥匙。" },
+  { name: "梅婆婆 May", en: "Wrong word? No fear. It sleeps under the stone.", zh: "答错词？别怕。它睡在石头下面等你。" },
+  { name: "梅婆婆 May", en: "Trees give wood. Wood makes good tools.", zh: "树给木头。木头能做好工具。" },
 ];
 let npcIdx = 0;
 function talkToNpc() {
@@ -371,7 +371,7 @@ function boxCollides(cx: number, cy: number, z: number): boolean {
 function update(dt: number) {
   if (quizOpen) { player.moving = false; return; }
   const v = inputVector();
-  const speed = 3.4;
+  const speed = 4.0;
   player.moving = Math.hypot(v.x, v.y) > 0.12;
   if (player.moving) {
     player.fx = Math.abs(v.x) > 0.3 ? Math.sign(v.x) : 0;
@@ -679,9 +679,9 @@ function render(now: number) {
         ctx.fillStyle = "#ffe9bd";
         ctx.font = "11px sans-serif";
         ctx.textAlign = "center";
-        ctx.fillText("Tom · 矿工", n.sx + TILE / 2, n.sy - TILE * 0.85);
+        ctx.fillText("梅婆婆", n.sx + TILE / 2, n.sy - TILE * 0.85);
       } else {
-        drawPerson(n.sx + TILE / 2, n.sy + 8, "#7a4d8f", "#4a2c5a", "Tom · 矿工");
+        drawPerson(n.sx + TILE / 2, n.sy + 8, "#7a4d8f", "#4a2c5a", "梅婆婆");
       }
     }
     if (Math.floor(player.y) === wy || (player.y > wy && player.y < wy + 1)) {
@@ -737,7 +737,7 @@ function updateHud() {
   const px = Math.floor(player.x), py = Math.floor(player.y);
   $("btnAct").textContent = nearNpc ? "聊天" : getDiff(save, px, py, player.z) === "pit" && player.z > 0 ? "上梯" : "下挖";
   $("hint").textContent = player.z === 0
-    ? "逛逛村庄，找 Tom 聊天 · 在草地上按「下挖」开始挖宝"
+    ? "逛逛村庄，找梅婆婆聊天 · 在草地上按「下挖」开始挖宝"
     : "金色框住的格子就是要挖的土 · 按住「挖」· 脚下「下挖」继续深入";
 }
 
