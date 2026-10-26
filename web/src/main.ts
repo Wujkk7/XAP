@@ -34,7 +34,11 @@ if (!Array.isArray(save.seenWords)) save.seenWords = [];
 const seed = save.seed;
 let book = MasteryBook.deserialize(save.mastery);
 
-const player = { x: 0.5, y: 0.5, z: 0, fx: 0, fy: 1, moving: false };
+const player = { x: 0.5, y: 0.5, z: 0, fx: 0, fy: 1, moving: false, vx: 0, vy: 0 };
+const cam = { x: 0.5, y: 0.5 }; // smoothed camera (Stardew-style gentle follow)
+let strideDist = 0; // distance travelled; drives the run cycle + footstep dust
+let stridePhase = 0;
+function snapCam() { cam.x = player.x; cam.y = player.y; }
 let coins = save.inventory["coin"] ?? 0;
 let digTarget: string | null = null;
 let digProgress = 0;
@@ -244,7 +248,12 @@ function goDown(px: number, py: number) {
     spawnDebris(px, py, landing.type, 12, true);
   }
   if (tileAt(px, py, player.z).type === "empty") setDiff(save, px, py, player.z, "shaft");
+  // Land centred on the shaft column so the body box fits the cleared tile
+  // exactly; next to a chest/stone landing, push out immediately instead.
+  if (!tileAt(px, py, player.z).solid) { player.x = px + 0.5; player.y = py + 0.5; }
+  else resolveEmbed();
   ascendGrace = 0.9;
+  snapCam();
   if (player.z === 31) toast("进入浅岩层 · 单词变难了");
   else if (player.z === 101) toast("进入岩核层");
   else if (player.z % 10 === 0) {
@@ -267,6 +276,7 @@ function descendOrAct() {
   if (canAscend) {
     player.z -= 1;
     ascendGrace = 0.9;
+    snapCam();
     toast("回到 " + player.z + "m");
     persist();
     return;
@@ -415,7 +425,7 @@ function collectDrops() {
 function drawDrops(now: number) {
   for (const d of drops) {
     if (d.z !== player.z) continue;
-    const s = { sx: W / 2 + (d.x + 0.5 - player.x) * TILE, sy: H * 0.42 + (d.y + 0.5 - player.y) * ROW_H };
+    const s = { sx: W / 2 + (d.x + 0.5 - cam.x) * TILE, sy: H * 0.42 + (d.y + 0.5 - cam.y) * ROW_H };
     const bobY = Math.sin(now / 280 + d.x * 1.7 + d.y) * 2.5;
     ctx.save();
     ctx.translate(s.sx, s.sy - 6 + bobY);
@@ -504,8 +514,8 @@ function updateParticles(dt: number) {
 }
 function drawParticles() {
   for (const pt of particles) {
-    const sx = W / 2 + (pt.x - player.x) * TILE;
-    const sy = H * 0.42 + (pt.y - player.y) * ROW_H;
+    const sx = W / 2 + (pt.x - cam.x) * TILE;
+    const sy = H * 0.42 + (pt.y - cam.y) * ROW_H;
     ctx.globalAlpha = Math.max(0, 1 - pt.life / pt.maxLife);
     ctx.fillStyle = pt.color;
     ctx.fillRect(sx - pt.size / 2, sy - pt.size / 2, pt.size, pt.size);
@@ -515,6 +525,22 @@ function drawParticles() {
 
 // ---------- movement ----------
 const PLAYER_HALF = 0.30; // collision half-extent; the sprite is drawn ~0.62 tiles wide to match
+
+/** Push the player out of any solid he ended up inside (bad landing, a
+ *  reburied stone, ...). Last resort: dig out the tile under him. */
+function resolveEmbed() {
+  if (!boxCollides(player.x, player.y, player.z)) return;
+  for (let r = 0.15; r <= 1.6; r += 0.15) {
+    for (let a = 0; a < 8; a++) {
+      const nx = player.x + Math.cos((a * Math.PI) / 4) * r;
+      const ny = player.y + Math.sin((a * Math.PI) / 4) * r;
+      if (!boxCollides(nx, ny, player.z)) { player.x = nx; player.y = ny; return; }
+    }
+  }
+  const px = Math.floor(player.x), py = Math.floor(player.y);
+  const t = tileAt(px, py, player.z);
+  if (t.solid && t.type !== "chest" && t.type !== "stubborn") setDiff(save, px, py, player.z, "dug");
+}
 
 function boxCollides(cx: number, cy: number, z: number): boolean {
   const h = PLAYER_HALF - 0.02;
@@ -528,33 +554,45 @@ function boxCollides(cx: number, cy: number, z: number): boolean {
 
 function update(dt: number) {
   if (quizOpen || dexOpen) { player.moving = false; return; }
-  // Safety net: if we ever end up inside a solid (bad landing, reburied
-  // stone, ...), push out to the nearest free spot instead of staying stuck.
-  if (boxCollides(player.x, player.y, player.z)) {
-    outer: for (let r = 0.15; r <= 1.6; r += 0.15) {
-      for (let a = 0; a < 8; a++) {
-        const nx = player.x + Math.cos((a * Math.PI) / 4) * r;
-        const ny = player.y + Math.sin((a * Math.PI) / 4) * r;
-        if (!boxCollides(nx, ny, player.z)) { player.x = nx; player.y = ny; break outer; }
-      }
-    }
-  }
+  resolveEmbed();
   const v = inputVector();
-  const speed = 4.0;
+  // Velocity with exponential approach: soft starts/stops instead of the
+  // instant on/off that made running feel robotic.
+  const MAXS = 4.0, ACC = 11;
+  player.vx += (v.x * MAXS - player.vx) * Math.min(1, dt * ACC);
+  player.vy += (v.y * MAXS - player.vy) * Math.min(1, dt * ACC);
+  if (Math.hypot(player.vx, player.vy) < 0.03 && Math.hypot(v.x, v.y) < 0.12) { player.vx = 0; player.vy = 0; }
   player.moving = Math.hypot(v.x, v.y) > 0.12;
   if (player.moving) {
     player.fx = Math.abs(v.x) > 0.3 ? Math.sign(v.x) : 0;
     player.fy = Math.abs(v.y) > 0.3 ? Math.sign(v.y) : (player.fx === 0 ? player.fy : 0);
     if (player.fx === 0 && player.fy === 0) player.fy = 1;
-    const nx = player.x + v.x * speed * dt;
-    const ny = player.y + v.y * speed * dt;
-    // full-AABB, axis separated: the whole body box must stay out of solids
-    if (!boxCollides(nx, player.y, player.z)) player.x = nx;
-    if (!boxCollides(player.x, ny, player.z)) player.y = ny;
   }
-  if (player.moving) {
-    stepTimer += dt;
-    if (stepTimer > 0.14) {
+  const ox = player.x, oy = player.y;
+  const nx = player.x + player.vx * dt;
+  const ny = player.y + player.vy * dt;
+  // full-AABB, axis separated, with a corner assist: when an axis is blocked
+  // by a hair, slide along the wall toward the opening instead of sticking.
+  if (!boxCollides(nx, player.y, player.z)) player.x = nx;
+  else if (Math.abs(player.vx) > 0.5) {
+    const sl = Math.min(0.085, Math.abs(player.vx * dt) + 0.02);
+    const dir = player.y - (Math.floor(player.y) + 0.5) > 0 ? -1 : 1;
+    if (!boxCollides(nx, player.y + dir * sl, player.z)) { player.x = nx; player.y += dir * sl; }
+    else if (!boxCollides(nx, player.y - dir * sl, player.z)) { player.x = nx; player.y -= dir * sl; }
+  }
+  if (!boxCollides(player.x, ny, player.z)) player.y = ny;
+  else if (Math.abs(player.vy) > 0.5) {
+    const sl = Math.min(0.085, Math.abs(player.vy * dt) + 0.02);
+    const dir = player.x - (Math.floor(player.x) + 0.5) > 0 ? -1 : 1;
+    if (!boxCollides(player.x + dir * sl, ny, player.z)) { player.y = ny; player.x += dir * sl; }
+    else if (!boxCollides(player.x - dir * sl, ny, player.z)) { player.y = ny; player.x -= dir * sl; }
+  }
+  const movedDist = Math.hypot(player.x - ox, player.y - oy);
+  strideDist += movedDist;
+  stridePhase = (strideDist / 0.38) * Math.PI;
+  if (movedDist > 0.001) {
+    stepTimer += movedDist;
+    if (stepTimer > 0.38) {
       stepTimer = 0;
       particles.push({
         x: player.x + (Math.random() - 0.5) * 0.34, y: player.y + 0.34,
@@ -897,7 +935,7 @@ function drawPlayer(sx: number, sy: number, bob: number) {
   ctx.beginPath(); ctx.ellipse(sx, sy + ROW_H - 2, 11, 4, 0, 0, Math.PI * 2); ctx.fill();
   // Run cycle: the whole body sways/tilts while moving (the sprite sheet has
   // a single frame per direction, so the motion sells the run).
-  const tilt = player.moving ? Math.sin(Date.now() / 92) * 0.06 : 0;
+  const tilt = Math.sin(stridePhase) * 0.05 + Math.max(-0.05, Math.min(0.05, player.vx * 0.014));
   ctx.save();
   ctx.translate(sx, sy + ROW_H + 3);
   ctx.rotate(tilt);
@@ -926,7 +964,7 @@ function drawPlayer(sx: number, sy: number, bob: number) {
 function render(now: number) {
   ctx.fillStyle = player.z === 0 ? "#5d8f43" : "#241a10";
   ctx.fillRect(0, 0, W, H);
-  const camX = player.x, camY = player.y;
+  const camX = cam.x, camY = cam.y;
   const halfCols = Math.ceil(W / TILE / 2) + 2;
   const halfRows = Math.ceil(H / ROW_H / 2) + 2;
   const x0 = Math.floor(camX) - halfCols, x1 = Math.floor(camX) + halfCols;
@@ -970,7 +1008,8 @@ function render(now: number) {
     }
     if (Math.floor(player.y) === wy || (player.y > wy && player.y < wy + 1)) {
       const p = toScreen(player.x, player.y);
-      const bob = player.moving ? Math.sin(now / 78) * 2.4 : 0;
+      const spd = Math.hypot(player.vx, player.vy);
+      const bob = spd > 0.4 ? Math.sin(stridePhase) * 2.2 : 0;
       // Anchor the sprite to the TOP of the tile row the player stands in:
       // p.sy is the screen y of the player's exact position (mid-tile at
       // spawn), so passing it straight to drawPlayer pushed the sprite half
@@ -1047,6 +1086,10 @@ function frame(now: number) {
   last = now;
   try {
     update(dt);
+    // smooth camera follow (frame-rate independent exponential approach)
+    const cf = 1 - Math.exp(-7 * dt);
+    cam.x += (player.x - cam.x) * cf;
+    cam.y += (player.y - cam.y) * cf;
     render(now);
     updateHud();
   } catch (err) {
@@ -1102,4 +1145,11 @@ if (!localStorage.getItem("xap-seen")) {
   toast("欢迎来到 XAP 村 · 去地下挖宝吧");
   try { localStorage.setItem("xap-seen", "1"); } catch { /* ignore */ }
 }
+// test hook: lets the headless drive harness steer and inspect the game
+(window as any).__xap = {
+  player, cam, boxCollides, tileAt, drops, particles,
+  pressAct: () => actButton(),
+  setDig: (b: boolean) => { digHeld = b; },
+  get save() { return save; },
+};
 requestAnimationFrame(frame);
