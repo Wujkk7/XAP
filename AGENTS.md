@@ -52,6 +52,9 @@ npm run demo    # ASCII 地图 + 示例题目，肉眼检查生成
 - [x] v2 美术定版（gami 亲制，`assets/reference/v2/`）：`tools/slice_assets_v2.py`
   切 31 张精灵（边框中位数取背景色＋最大连通域清理＋个别精灵收紧容差），
   构建重新内联打包；地块调小 TILE=36/ROW_H=31、移速 4.0；NPC 改梅婆婆 May
+- [x] 试玩二轮修复：update 脱困推离（防嵌块卡死）、输入闩锁重置＋主循环
+  try/catch、树/房贴图收窄＋背后半透明；地表坑洞渲染＋走入下潜；
+  Minecraft 式碎屑粒子（挖掘掉渣/挖碎爆发/开箱金屑）
 - [ ] 下一步：真机试玩反馈后调手感数值（移动速度、挖掘时长、镜头），再搭 Cocos
   工程骨架，把 web 原型的视图层移植过去（core 不动；精灵改走图集，不再 base64）
 - [ ] 词库扩充：tier2+ 数据文件（格式同 `core/vocab.ts` 的 WordEntry）
