@@ -552,9 +552,16 @@
     if (digTarget !== k) {
       digTarget = k;
       digProgress = 0;
+      digParticleTimer = 0;
     }
     digProgress += dt / (tile.hardness * 0.42);
+    digParticleTimer += dt;
+    if (digParticleTimer > 0.07) {
+      digParticleTimer = 0;
+      spawnDebris(t.x, t.y, tile.type, 2, false);
+    }
     if (digProgress < 1) return;
+    spawnDebris(t.x, t.y, tile.type, 14, true);
     setDiff(save, t.x, t.y, player.z, "dug");
     digTarget = null;
     digProgress = 0;
@@ -570,6 +577,18 @@
     }
     persist();
   }
+  function goDown(px, py) {
+    player.z += 1;
+    const landing = tileAt(px, py, player.z);
+    if (landing.solid && landing.type !== "chest" && landing.type !== "stubborn") {
+      setDiff(save, px, py, player.z, "dug");
+      spawnDebris(px, py, landing.type, 12, true);
+    }
+    ascendGrace = 0.9;
+    if (player.z === 31) toast("\u8FDB\u5165\u6D45\u5CA9\u5C42 \xB7 \u5355\u8BCD\u53D8\u96BE\u4E86");
+    else if (player.z === 101) toast("\u8FDB\u5165\u5CA9\u6838\u5C42");
+    else toast("\u4E0B\u5230 " + player.z + "m");
+  }
   function descendOrAct() {
     if (quizOpen) return;
     const dNpc = Math.hypot(player.x - (NPC_POS.x + 0.5), player.y - (NPC_POS.y + 0.5));
@@ -581,19 +600,13 @@
     const here = getDiff(save, px, py, player.z);
     if (here === "pit" && player.z > 0) {
       player.z -= 1;
+      ascendGrace = 0.9;
       toast("\u56DE\u5230 " + player.z + "m");
       persist();
       return;
     }
     setDiff(save, px, py, player.z, "pit");
-    player.z += 1;
-    const landing = tileAt(px, py, player.z);
-    if (landing.solid && landing.type !== "chest" && landing.type !== "stubborn") {
-      setDiff(save, px, py, player.z, "dug");
-    }
-    if (player.z === 31) toast("\u8FDB\u5165\u6D45\u5CA9\u5C42 \xB7 \u5355\u8BCD\u53D8\u96BE\u4E86");
-    else if (player.z === 101) toast("\u8FDB\u5165\u5CA9\u6838\u5C42");
-    else toast("\u4E0B\u5230 " + player.z + "m");
+    goDown(px, py);
     persist();
   }
   function actButton() {
@@ -662,9 +675,11 @@
     if (q.kind === "chest") {
       reward = Math.round(10 * Math.max(1, stratumAt(Math.max(1, q.z)).id) * res.rewardMultiplier);
       setDiff(save, q.x, q.y, q.z, "dug");
+      spawnDebris(q.x, q.y, "chest", 16, true);
     } else if (q.everCorrect) {
       reward = Math.round(15 * res.rewardMultiplier);
       setDiff(save, q.x, q.y, q.z, "dug");
+      spawnDebris(q.x, q.y, "stubborn", 14, true);
       delete save.stubborn[key(q.x, q.y, q.z)];
     }
     coins += reward;
@@ -684,6 +699,71 @@
       toast(msg);
     }, 1100);
   }
+  var particles = [];
+  var ascendGrace = 0;
+  var lastTileKey = "";
+  var digParticleTimer = 0;
+  var DEBRIS_COLORS = {
+    dirt: ["#8a613c", "#a0764a", "#6e4c2c"],
+    sandstone: ["#c9b083", "#b89a68", "#dcc493"],
+    rock: ["#8d8578", "#767065", "#a39a89"],
+    granite: ["#7d7468", "#94897a", "#655c50"],
+    obsidian: ["#4a4258", "#5d5470", "#38324a"],
+    tree: ["#6e4c2c", "#4e7d3a", "#5d9146"],
+    surface_rock: ["#8f8a80", "#76716a", "#b5b0a4"],
+    chest: ["#a5722f", "#ffd94d", "#7d5222"],
+    stubborn: ["#8d8578", "#c03a5e", "#767065"]
+  };
+  var ORE_GEMS = {
+    ore_copper: "#d98a4a",
+    ore_iron: "#e8e4da",
+    ore_gold: "#ffd94d",
+    ore_diamond: "#7fd4ff",
+    ore_starcore: "#b48cff"
+  };
+  function debrisColors(type) {
+    if (type.startsWith("ore_")) return ["#8d8578", "#767065", ORE_GEMS[type] ?? "#ffffff"];
+    return DEBRIS_COLORS[type] ?? DEBRIS_COLORS.rock;
+  }
+  function spawnDebris(wx, wy, type, n, burst) {
+    const cols = debrisColors(type);
+    for (let i = 0; i < n; i++) {
+      particles.push({
+        x: wx + 0.2 + Math.random() * 0.6,
+        y: wy + 0.25 + Math.random() * 0.55,
+        vx: (Math.random() - 0.5) * (burst ? 2.6 : 1.3),
+        vy: -(0.7 + Math.random() * (burst ? 2.4 : 1.3)),
+        life: 0,
+        maxLife: 0.45 + Math.random() * 0.45,
+        color: cols[Math.random() * cols.length | 0],
+        size: 2 + Math.random() * (burst ? 4 : 3)
+      });
+    }
+    if (particles.length > 260) particles.splice(0, particles.length - 260);
+  }
+  function updateParticles(dt) {
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const pt = particles[i];
+      pt.life += dt;
+      if (pt.life >= pt.maxLife) {
+        particles.splice(i, 1);
+        continue;
+      }
+      pt.vy += 7 * dt;
+      pt.x += pt.vx * dt;
+      pt.y += pt.vy * dt;
+    }
+  }
+  function drawParticles() {
+    for (const pt of particles) {
+      const sx = view.W / 2 + (pt.x - player.x) * TILE;
+      const sy = view.H * 0.42 + (pt.y - player.y) * ROW_H;
+      ctx.globalAlpha = Math.max(0, 1 - pt.life / pt.maxLife);
+      ctx.fillStyle = pt.color;
+      ctx.fillRect(sx - pt.size / 2, sy - pt.size / 2, pt.size, pt.size);
+    }
+    ctx.globalAlpha = 1;
+  }
   var PLAYER_HALF = 0.3;
   function boxCollides(cx, cy, z) {
     const h = PLAYER_HALF - 0.02;
@@ -698,6 +778,19 @@
     if (quizOpen) {
       player.moving = false;
       return;
+    }
+    if (boxCollides(player.x, player.y, player.z)) {
+      outer: for (let r = 0.15; r <= 1.6; r += 0.15) {
+        for (let a = 0; a < 8; a++) {
+          const nx = player.x + Math.cos(a * Math.PI / 4) * r;
+          const ny = player.y + Math.sin(a * Math.PI / 4) * r;
+          if (!boxCollides(nx, ny, player.z)) {
+            player.x = nx;
+            player.y = ny;
+            break outer;
+          }
+        }
+      }
     }
     const v = inputVector();
     const speed = 4;
@@ -716,6 +809,19 @@
       digTarget = null;
       digProgress = 0;
     }
+    ascendGrace = Math.max(0, ascendGrace - dt);
+    const px = Math.floor(player.x), py = Math.floor(player.y);
+    const tk = px + "," + py + "," + player.z;
+    if (tk !== lastTileKey) {
+      const entered = lastTileKey !== "";
+      lastTileKey = tk;
+      if (entered && ascendGrace <= 0 && tileAt(px, py, player.z).type === "pit") {
+        goDown(px, py);
+        lastTileKey = px + "," + py + "," + player.z;
+        persist();
+      }
+    }
+    updateParticles(dt);
   }
   var IMG = {};
   function loadSprites() {
@@ -837,11 +943,40 @@
       if (t.type === "empty") {
         if (imgReady("tile_dirt")) drawGroundSprite("tile_dirt", sx, sy);
       }
+      if (t.type === "pit") {
+        ctx.fillStyle = "#2a1a0c";
+        ctx.beginPath();
+        ctx.ellipse(sx + TILE / 2, sy + ROW_H / 2 + 2, TILE * 0.36, ROW_H * 0.34, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#0f0803";
+        ctx.beginPath();
+        ctx.ellipse(sx + TILE / 2, sy + ROW_H / 2 + 3, TILE * 0.27, ROW_H * 0.25, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(245,205,135,.6)";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.ellipse(sx + TILE / 2, sy + ROW_H / 2 + 2, TILE * 0.36, ROW_H * 0.34, 0, Math.PI, Math.PI * 1.9);
+        ctx.stroke();
+        ctx.strokeStyle = "#a9743f";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(sx + TILE / 2 - 4, sy + ROW_H / 2 + 1);
+        ctx.lineTo(sx + TILE / 2 - 4, sy + ROW_H / 2 + 9);
+        ctx.moveTo(sx + TILE / 2 + 4, sy + ROW_H / 2 + 1);
+        ctx.lineTo(sx + TILE / 2 + 4, sy + ROW_H / 2 + 9);
+        ctx.moveTo(sx + TILE / 2 - 4, sy + ROW_H / 2 + 5);
+        ctx.lineTo(sx + TILE / 2 + 4, sy + ROW_H / 2 + 5);
+        ctx.stroke();
+      }
       if (t.type === "tree") {
         const v = hashCoords(seed, wx, wy, 0, 22) % 3;
         const name = v === 0 ? "tree_oak" : v === 1 ? "tree_pine" : "tree_apple";
-        if (imgReady(name)) drawSprite(name, sx + TILE / 2, sy + ROW_H + 8, TILE * 2.15);
-        else {
+        if (imgReady(name)) {
+          const behindTree = wy === Math.floor(player.y) + 1 && Math.abs(wx - Math.floor(player.x)) <= 1;
+          if (behindTree) ctx.globalAlpha = 0.45;
+          drawSprite(name, sx + TILE / 2, sy + ROW_H + 8, TILE * 1.8);
+          ctx.globalAlpha = 1;
+        } else {
           ctx.fillStyle = "#6b4a26";
           ctx.fillRect(sx + TILE / 2 - 3, sy + 18, 6, 14);
           ctx.fillStyle = "#2f7a33";
@@ -924,7 +1059,7 @@
   }
   function drawHouseSprite(sx, sy, name) {
     if (imgReady(name)) {
-      drawSprite(name, sx + TILE, sy + ROW_H + 12, TILE * 2.9);
+      drawSprite(name, sx + TILE, sy + ROW_H + 12, TILE * 2.4);
       return;
     }
     ctx.fillStyle = "#8a6642";
@@ -1012,10 +1147,17 @@
         drawTile(sx, sy, wx, wy);
       }
       if (player.z === 0 && wy === -3) {
+        const ptx = Math.floor(player.x), pty = Math.floor(player.y);
+        const behindRed = pty <= -4 && ptx >= 3 && ptx <= 4;
+        const behindBlue = pty <= -4 && ptx >= 6 && ptx <= 7;
         const h1 = toScreen(3, -3);
+        if (behindRed) ctx.globalAlpha = 0.45;
         drawHouseSprite(h1.sx, h1.sy, "house_red");
+        ctx.globalAlpha = 1;
         const h2 = toScreen(6, -3);
+        if (behindBlue) ctx.globalAlpha = 0.45;
         drawHouseSprite(h2.sx, h2.sy, "house_blue");
+        ctx.globalAlpha = 1;
       }
       if (player.z === 0 && wy === NPC_POS.y) {
         const n = toScreen(NPC_POS.x, NPC_POS.y);
@@ -1032,13 +1174,14 @@
       if (Math.floor(player.y) === wy || player.y > wy && player.y < wy + 1) {
         const p = toScreen(player.x, player.y);
         const bob = player.moving ? Math.sin(now / 90) * 2 : 0;
-        drawPlayer(p.sx + TILE / 2, p.sy, bob);
+        const topY = p.sy - (player.y - Math.floor(player.y)) * ROW_H;
+        drawPlayer(p.sx + TILE / 2, topY, bob);
         if (digHeld && digTarget) {
           ctx.strokeStyle = "#d8d8e0";
           ctx.lineWidth = 3;
           ctx.beginPath();
-          const hx = p.sx + TILE / 2 + player.fx * 16, hy = p.sy + 12 + bob;
-          ctx.moveTo(p.sx + TILE / 2, p.sy + 8 + bob);
+          const hx = p.sx + TILE / 2 + player.fx * 16, hy = topY + ROW_H - 4 + bob;
+          ctx.moveTo(p.sx + TILE / 2, topY + ROW_H - 10 + bob);
           ctx.lineTo(hx, hy - 8 + Math.sin(now / 60) * 4);
           ctx.stroke();
         }
@@ -1059,6 +1202,7 @@
       }
     }
     if (player.z > 0) {
+      drawParticles();
       const dark = Math.min(0.42, player.z * 4e-3);
       ctx.fillStyle = `rgba(8,4,2,${dark})`;
       ctx.fillRect(0, 0, W, H);
@@ -1081,9 +1225,25 @@
     if (canvas.clientWidth && (canvas.clientWidth !== W || canvas.clientHeight !== H)) resize();
     const dt = Math.min(0.05, (now - last) / 1e3 || 0.016);
     last = now;
-    update(dt);
-    render(now);
-    updateHud();
+    try {
+      update(dt);
+      render(now);
+      updateHud();
+    } catch (err) {
+      console.error(err);
+      quizOpen = false;
+      activeQuiz = null;
+      digHeld = false;
+      keys.clear();
+      joy.active = false;
+      joy.dx = 0;
+      joy.dy = 0;
+      const eb = $("errbar");
+      if (eb) {
+        eb.style.display = "block";
+        eb.textContent = "\u51FA\u9519\u5DF2\u81EA\u52A8\u6062\u590D: " + String(err).slice(0, 90);
+      }
+    }
     requestAnimationFrame(frame);
   }
   loadSprites();
@@ -1091,6 +1251,17 @@
     if (!e.target.closest(".sheet")) e.preventDefault();
   }, { passive: false });
   document.addEventListener("gesturestart", (e) => e.preventDefault());
+  function resetInputs() {
+    keys.clear();
+    digHeld = false;
+    joy.active = false;
+    joy.dx = 0;
+    joy.dy = 0;
+  }
+  window.addEventListener("blur", resetInputs);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) resetInputs();
+  });
   bindJoystick();
   bindButton("btnDig", () => digHeld = true, () => digHeld = false);
   bindButton("btnAct", () => actButton());
