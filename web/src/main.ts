@@ -354,7 +354,38 @@ function update(dt: number) {
   else { digTarget = null; digProgress = 0; }
 }
 
-// ---------- rendering ----------
+// ---------- rendering (art direction: the reference boards in assets/reference) ----------
+import { SPRITES } from "./sprites.ts";
+import { hashCoords } from "../../core/rng.ts";
+
+const IMG: Record<string, HTMLImageElement> = {};
+function loadSprites() {
+  if (typeof Image === "undefined") return;
+  for (const [name, uri] of Object.entries(SPRITES)) {
+    const im = new Image();
+    im.src = uri;
+    IMG[name] = im;
+  }
+}
+function imgReady(name: string): boolean {
+  const im = IMG[name];
+  return !!im && im.complete && im.naturalWidth > 0;
+}
+/** Draw a sprite centered at cx, standing on `bottom`, scaled to width w. */
+function drawSprite(name: string, cx: number, bottom: number, w: number, flip = false) {
+  const im = IMG[name];
+  const h = (w * im.naturalHeight) / im.naturalWidth;
+  ctx.save();
+  if (flip) {
+    ctx.translate(cx, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(im, -w / 2, bottom - h, w, h);
+  } else {
+    ctx.drawImage(im, cx - w / 2, bottom - h, w, h);
+  }
+  ctx.restore();
+}
+
 const COLORS: Record<string, [string, string]> = {
   grass: ["#69a84f", "#55853e"], flower: ["#74b455", "#55853e"], tree: ["#69a84f", "#55853e"],
   surface_rock: ["#9a958c", "#6f6a61"],
@@ -365,62 +396,117 @@ const COLORS: Record<string, [string, string]> = {
   chest: ["#a06a2c", "#774d1d"], stubborn: ["#7a3b2e", "#57281e"], pit: ["#17110b", "#17110b"],
   empty: ["#241a10", "#241a10"],
 };
-const ORE_DOT: Record<string, string> = {
-  ore_copper: "#e08a4c", ore_iron: "#d8d8e0", ore_gold: "#ffd94d", ore_diamond: "#7de8ff", ore_starcore: "#c07dff",
+const ORE_NODE: Record<string, string> = {
+  ore_copper: "node_copper", ore_iron: "node_iron", ore_gold: "node_gold",
+  ore_diamond: "node_sapphire", ore_starcore: "node_starcore",
+};
+const STRATUM_TINT: Record<number, string> = {
+  1: "rgba(0,0,0,0)", 2: "rgba(196,164,101,0.26)", 3: "rgba(150,150,160,0.30)",
+  4: "rgba(70,60,100,0.36)", 5: "rgba(40,25,70,0.44)",
 };
 
-function drawTile(sx: number, sy: number, wx: number, wy: number) {
-  const t = tileAt(wx, wy, player.z);
-  const [top, front] = COLORS[t.type] ?? COLORS.dirt;
-  // front face then top face, rows drawn top-to-bottom so faces overlap right
+// Village dressing (surface only): dirt paths + a small farm plot west of spawn.
+function isPathTile(wx: number, wy: number): boolean {
+  return (wy === -1 && wx >= -4 && wx <= 10) || (wx === 5 && wy >= -1 && wy <= 4);
+}
+function isFarmTile(wx: number, wy: number): boolean {
+  return wx >= -7 && wx <= -5 && wy >= -4 && wy <= -2;
+}
+
+function drawGroundSprite(name: string, sx: number, sy: number) {
+  // slight overdraw hides seams between tiles
+  ctx.drawImage(IMG[name], sx - 1, sy - 1, TILE + 2, ROW_H + 2);
+}
+function flatTile(sx: number, sy: number, type: string) {
+  const [top, front] = COLORS[type] ?? COLORS.dirt;
   ctx.fillStyle = front;
   ctx.fillRect(sx, sy + ROW_H - 4, TILE - 1, FACE);
   ctx.fillStyle = top;
   ctx.fillRect(sx, sy, TILE - 1, ROW_H - 1);
+}
+
+function grassVariant(wx: number, wy: number): string {
+  const r = hashCoords(seed, wx, wy, 0, 21) % 100;
+  return r < 55 ? "tile_grass" : r < 82 ? "tile_grass_tall" : "tile_grass_flower";
+}
+
+function drawTile(sx: number, sy: number, wx: number, wy: number) {
+  const t = tileAt(wx, wy, player.z);
+
   if (player.z === 0) {
+    // ----- surface -----
+    let ground = grassVariant(wx, wy);
+    if (t.type === "flower") ground = "tile_grass_flower";
+    if (isFarmTile(wx, wy)) ground = "tile_plowed";
+    else if (isPathTile(wx, wy)) ground = "tile_sand";
+    if (imgReady(ground)) drawGroundSprite(ground, sx, sy);
+    else flatTile(sx, sy, t.type);
+    if (t.type === "empty") { // a dug-out patch on the surface shows bare dirt
+      if (imgReady("tile_dirt")) drawGroundSprite("tile_dirt", sx, sy);
+    }
     if (t.type === "tree") {
-      ctx.fillStyle = "#6b4a26";
-      ctx.fillRect(sx + TILE / 2 - 3, sy + 18, 6, 14);
-      ctx.fillStyle = "#2f7a33";
-      ctx.beginPath();
-      ctx.arc(sx + TILE / 2, sy + 14, 15, 0, Math.PI * 2);
-      ctx.arc(sx + TILE / 2 - 11, sy + 20, 10, 0, Math.PI * 2);
-      ctx.arc(sx + TILE / 2 + 11, sy + 20, 10, 0, Math.PI * 2);
-      ctx.fill();
-    } else if (t.type === "flower") {
-      ctx.fillStyle = "#ff8fb3";
-      ctx.fillRect(sx + 10, sy + 10, 4, 4); ctx.fillRect(sx + 30, sy + 22, 4, 4);
-      ctx.fillStyle = "#ffd166";
-      ctx.fillRect(sx + 22, sy + 16, 4, 4);
+      const v = hashCoords(seed, wx, wy, 0, 22) % 3;
+      const name = v === 0 ? "tree_oak" : v === 1 ? "tree_pine" : "tree_apple";
+      if (imgReady(name)) drawSprite(name, sx + TILE / 2, sy + ROW_H + 8, TILE * 2.15);
+      else {
+        ctx.fillStyle = "#6b4a26";
+        ctx.fillRect(sx + TILE / 2 - 3, sy + 18, 6, 14);
+        ctx.fillStyle = "#2f7a33";
+        ctx.beginPath();
+        ctx.arc(sx + TILE / 2, sy + 14, 15, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (t.type === "surface_rock") {
+      if (imgReady("node_rock")) drawSprite("node_rock", sx + TILE / 2, sy + ROW_H + 5, TILE * 1.3);
     }
     return;
   }
-  if (t.type === "chest") {
-    ctx.fillStyle = "#7a4d1c";
-    ctx.fillRect(sx + 6, sy + 9, TILE - 13, 20);
-    ctx.fillStyle = "#ffd94d";
-    ctx.fillRect(sx + 6, sy + 17, TILE - 13, 4);
-    ctx.fillRect(sx + TILE / 2 - 3, sy + 9, 6, 20);
-  } else if (t.type === "stubborn") {
-    ctx.fillStyle = "#ffe9bd";
-    ctx.font = "bold 20px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("!", sx + TILE / 2, sy + 27);
-  } else if (t.type === "pit") {
+
+  // ----- underground -----
+  const stratum = stratumAt(player.z);
+  const baseName = stratum.id === 1 ? "tile_dirt" : "tile_rock";
+  const walkable = t.type === "empty" || t.type === "pit";
+  if (imgReady(baseName)) drawGroundSprite(baseName, sx, sy);
+  else flatTile(sx, sy, t.type);
+  ctx.fillStyle = STRATUM_TINT[stratum.id];
+  ctx.fillRect(sx, sy, TILE - 1, ROW_H - 1);
+  if (walkable) {
+    ctx.fillStyle = "rgba(24,13,5,0.45)"; // dug-out floor reads darker
+    ctx.fillRect(sx, sy, TILE - 1, ROW_H - 1);
+  }
+  if (t.type === "pit") {
     ctx.fillStyle = "#000";
     ctx.beginPath();
     ctx.ellipse(sx + TILE / 2, sy + ROW_H / 2, 15, 9, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = "#c9a86a";
     ctx.fillRect(sx + TILE / 2 - 2, sy + 4, 4, ROW_H - 8);
-  } else if (ORE_DOT[t.type]) {
-    ctx.fillStyle = ORE_DOT[t.type];
-    const h = (wx * 31 + wy * 57 + player.z) % 3;
-    ctx.fillRect(sx + 9 + h * 5, sy + 10, 6, 5);
-    ctx.fillRect(sx + 26, sy + 20 + h * 2, 6, 5);
-    ctx.fillRect(sx + 15, sy + 26, 5, 4);
+  } else if (t.type === "chest") {
+    ctx.fillStyle = "#7a4d1c";
+    ctx.fillRect(sx + 5, sy + 8, TILE - 11, 22);
+    ctx.fillStyle = "#a8722a";
+    ctx.fillRect(sx + 5, sy + 8, TILE - 11, 8);
+    ctx.fillStyle = "#ffd94d";
+    ctx.fillRect(sx + 5, sy + 17, TILE - 11, 4);
+    ctx.fillRect(sx + TILE / 2 - 3, sy + 8, 6, 22);
+    ctx.fillStyle = "#5a3a10";
+    ctx.fillRect(sx + TILE / 2 - 2, sy + 18, 4, 5);
+  } else if (t.type === "stubborn") {
+    if (imgReady("node_ruby")) drawSprite("node_ruby", sx + TILE / 2, sy + ROW_H + 4, TILE * 1.2);
+    ctx.fillStyle = "#ffe9bd";
+    ctx.font = "bold 20px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("!", sx + TILE / 2, sy + 16);
+  } else if (ORE_NODE[t.type]) {
+    const name = ORE_NODE[t.type];
+    if (imgReady(name)) drawSprite(name, sx + TILE / 2, sy + ROW_H + 5, TILE * 1.35);
+    else {
+      ctx.fillStyle = "#e8e8e8";
+      ctx.fillRect(sx + 12, sy + 12, 8, 7);
+      ctx.fillRect(sx + 26, sy + 22, 8, 7);
+    }
   }
-  // dig cracks
+  // dig cracks on the current target
   const t2 = facingTile();
   if (digTarget === saveKey(t2.x, t2.y, player.z) && wx === t2.x && wy === t2.y && digProgress > 0) {
     ctx.strokeStyle = "rgba(0,0,0,.65)";
@@ -433,7 +519,12 @@ function drawTile(sx: number, sy: number, wx: number, wy: number) {
   }
 }
 
-function drawHouse(sx: number, sy: number) {
+function drawHouseSprite(sx: number, sy: number, name: "house_red" | "house_blue") {
+  if (imgReady(name)) {
+    // footprint is 2x2 tiles starting one row above (wy-1); sy is the bottom row
+    drawSprite(name, sx + TILE, sy + ROW_H + 12, TILE * 2.9);
+    return;
+  }
   ctx.fillStyle = "#8a6642";
   ctx.fillRect(sx, sy - 6, TILE * 2 - 2, ROW_H * 2 - 4);
   ctx.fillStyle = "#b0402f";
@@ -442,8 +533,6 @@ function drawHouse(sx: number, sy: number) {
   ctx.closePath(); ctx.fill();
   ctx.fillStyle = "#4a2f1a";
   ctx.fillRect(sx + TILE - 10, sy + ROW_H - 2, 18, ROW_H - 6);
-  ctx.fillStyle = "#ffd94d";
-  ctx.fillRect(sx + 12, sy + 8, 12, 12); ctx.fillRect(sx + TILE * 2 - 26, sy + 8, 12, 12);
 }
 
 function drawPerson(sx: number, sy: number, shirt: string, cap: string, label?: string) {
@@ -465,6 +554,20 @@ function drawPerson(sx: number, sy: number, shirt: string, cap: string, label?: 
   }
 }
 
+function drawPlayer(sx: number, sy: number, bob: number) {
+  let name = "miner_front";
+  let flip = false;
+  if (player.fy < 0) name = "miner_back";
+  else if (player.fx !== 0) { name = "miner_side"; flip = player.fx < 0; }
+  ctx.fillStyle = "rgba(0,0,0,.3)";
+  ctx.beginPath(); ctx.ellipse(sx, sy + ROW_H - 2, 11, 4, 0, 0, Math.PI * 2); ctx.fill();
+  if (imgReady(name)) {
+    drawSprite(name, sx, sy + ROW_H + 2 + bob, TILE * 0.78, flip);
+  } else {
+    drawPerson(sx, sy + 6 + bob, "#2f6fb4", "#ffd94d");
+  }
+}
+
 function render(now: number) {
   ctx.fillStyle = player.z === 0 ? "#5d8f43" : "#241a10";
   ctx.fillRect(0, 0, W, H);
@@ -482,18 +585,26 @@ function render(now: number) {
       const { sx, sy } = toScreen(wx, wy);
       drawTile(sx, sy, wx, wy);
     }
-    if (player.z === 0 && wy === -4) {
-      const h1 = toScreen(3, -4); drawHouse(h1.sx, h1.sy);
-      const h2 = toScreen(6, -4); drawHouse(h2.sx, h2.sy);
+    if (player.z === 0 && wy === -3) {
+      const h1 = toScreen(3, -3); drawHouseSprite(h1.sx, h1.sy, "house_red");
+      const h2 = toScreen(6, -3); drawHouseSprite(h2.sx, h2.sy, "house_blue");
     }
     if (player.z === 0 && wy === NPC_POS.y) {
       const n = toScreen(NPC_POS.x, NPC_POS.y);
-      drawPerson(n.sx + TILE / 2, n.sy + 8, "#7a4d8f", "#4a2c5a", "Tom · 矿工");
+      if (imgReady("tom_front")) {
+        drawSprite("tom_front", n.sx + TILE / 2, n.sy + ROW_H + 4, TILE * 0.78);
+        ctx.fillStyle = "#ffe9bd";
+        ctx.font = "11px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("Tom · 矿工", n.sx + TILE / 2, n.sy - TILE * 0.85);
+      } else {
+        drawPerson(n.sx + TILE / 2, n.sy + 8, "#7a4d8f", "#4a2c5a", "Tom · 矿工");
+      }
     }
     if (Math.floor(player.y) === wy || (player.y > wy && player.y < wy + 1)) {
       const p = toScreen(player.x, player.y);
       const bob = player.moving ? Math.sin(now / 90) * 2 : 0;
-      drawPerson(p.sx + TILE / 2, p.sy + 6 + bob, "#2f6fb4", "#ffd94d");
+      drawPlayer(p.sx + TILE / 2, p.sy, bob);
       if (digHeld && digTarget) {
         ctx.strokeStyle = "#d8d8e0";
         ctx.lineWidth = 3;
@@ -511,6 +622,7 @@ function render(now: number) {
     ctx.fillRect(0, 0, W, H);
   }
 }
+
 
 // ---------- HUD ----------
 function updateHud() {
@@ -544,6 +656,7 @@ function frame(now: number) {
   requestAnimationFrame(frame);
 }
 
+loadSprites();
 bindJoystick();
 bindButton("btnDig", () => (digHeld = true), () => (digHeld = false));
 bindButton("btnAct", () => actButton());

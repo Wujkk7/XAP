@@ -5,3 +5,4 @@ library/
 temp/
 *.log
 .DS_Store
+web/src/sprites.ts
