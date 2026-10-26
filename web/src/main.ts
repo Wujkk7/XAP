@@ -166,11 +166,41 @@ function facingTile(): { x: number; y: number } {
   return { x: Math.floor(player.x + player.fx * 0.9), y: Math.floor(player.y + player.fy * 0.9) };
 }
 
+function findDigTarget(): { x: number; y: number } | null {
+  // The tile that digging will hit: the faced adjacent tile if it is solid;
+  // otherwise auto-turn to the nearest solid neighbour so the player never
+  // has to guess which block is being dug (feedback 2026-10-27).
+  const px = Math.floor(player.x), py = Math.floor(player.y);
+  const order: Array<[number, number]> = [];
+  const base: Array<[number, number]> = [
+    [0, 1], [1, 0], [0, -1], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1],
+  ];
+  const start = base.findIndex(([dx, dy]) => dx === player.fx && dy === player.fy);
+  for (let i = 0; i < base.length; i++) {
+    const d = base[(start + i + base.length) % base.length];
+    order.push(d);
+    order.push(base[(start - i + base.length * 2) % base.length]);
+  }
+  const seen = new Set<string>();
+  for (const [dx, dy] of order) {
+    const k = dx + "," + dy;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const tx = px + dx, ty = py + dy;
+    if (villageBlocked(tx, ty, player.z)) continue;
+    if (tileAt(tx, ty, player.z).solid) {
+      if (dx !== player.fx || dy !== player.fy) { player.fx = dx; player.fy = dy; }
+      return { x: tx, y: ty };
+    }
+  }
+  return null;
+}
+
 function tryDig(dt: number) {
   if (quizOpen) return;
-  const t = facingTile();
+  const t = findDigTarget();
+  if (!t) { digTarget = null; digProgress = 0; return; }
   const tile = tileAt(t.x, t.y, player.z);
-  if (!tile.solid || villageBlocked(t.x, t.y, player.z)) { digTarget = null; digProgress = 0; return; }
   if (tile.type === "chest") { openChestQuiz(t.x, t.y); return; }
   if (tile.type === "stubborn") { openStubbornQuiz(t.x, t.y); return; }
 
@@ -326,6 +356,18 @@ function answerQuiz(i: number, btn: HTMLButtonElement) {
 }
 
 // ---------- movement ----------
+const PLAYER_HALF = 0.30; // collision half-extent; the sprite is drawn ~0.62 tiles wide to match
+
+function boxCollides(cx: number, cy: number, z: number): boolean {
+  const h = PLAYER_HALF - 0.02;
+  const x0 = Math.floor(cx - h), x1 = Math.floor(cx + h);
+  const y0 = Math.floor(cy - h), y1 = Math.floor(cy + h);
+  for (let ty = y0; ty <= y1; ty++)
+    for (let tx = x0; tx <= x1; tx++)
+      if (isSolid(tx, ty, z)) return true;
+  return false;
+}
+
 function update(dt: number) {
   if (quizOpen) { player.moving = false; return; }
   const v = inputVector();
@@ -337,18 +379,9 @@ function update(dt: number) {
     if (player.fx === 0 && player.fy === 0) player.fy = 1;
     const nx = player.x + v.x * speed * dt;
     const ny = player.y + v.y * speed * dt;
-    const r = 0.32;
-    // axis-separated collision against tile centers' cells
-    if (!isSolid(Math.floor(nx + Math.sign(v.x) * r), Math.floor(player.y), player.z) &&
-        !isSolid(Math.floor(nx + Math.sign(v.x) * r), Math.floor(player.y + r * 0.7), player.z) &&
-        !isSolid(Math.floor(nx + Math.sign(v.x) * r), Math.floor(player.y - r * 0.7), player.z)) {
-      player.x = nx;
-    }
-    if (!isSolid(Math.floor(player.x), Math.floor(ny + Math.sign(v.y) * r), player.z) &&
-        !isSolid(Math.floor(player.x + r * 0.7), Math.floor(ny + Math.sign(v.y) * r), player.z) &&
-        !isSolid(Math.floor(player.x - r * 0.7), Math.floor(ny + Math.sign(v.y) * r), player.z)) {
-      player.y = ny;
-    }
+    // full-AABB, axis separated: the whole body box must stay out of solids
+    if (!boxCollides(nx, player.y, player.z)) player.x = nx;
+    if (!boxCollides(player.x, ny, player.z)) player.y = ny;
   }
   if (digHeld) tryDig(dt);
   else { digTarget = null; digProgress = 0; }
@@ -425,6 +458,31 @@ function flatTile(sx: number, sy: number, type: string) {
   ctx.fillRect(sx, sy, TILE - 1, ROW_H - 1);
 }
 
+const FLAT_GROUND: Record<string, string> = {
+  tile_grass: "#69a84f", tile_grass_tall: "#5c9a44", tile_grass_flower: "#74b455",
+  tile_sand: "#d9bd85", tile_plowed: "#7a5230", tile_dirt: "#9a6a3d", tile_rock: "#8d8578",
+};
+/** Procedural ground used until the original art pass arrives (and as the
+ *  fallback if a sprite fails to load). */
+function flatGround(sx: number, sy: number, ground: string, wx: number, wy: number) {
+  ctx.fillStyle = FLAT_GROUND[ground] ?? "#69a84f";
+  ctx.fillRect(sx, sy, TILE - 1, ROW_H - 1);
+  const h = hashCoords(seed, wx, wy, 0, 23) % 4;
+  ctx.fillStyle = "rgba(0,0,0,0.10)";
+  ctx.fillRect(sx + 6 + h * 7, sy + 8, 5, 3);
+  ctx.fillRect(sx + 24 - h * 3, sy + 24, 5, 3);
+  if (ground === "tile_plowed") {
+    ctx.fillStyle = "rgba(0,0,0,0.22)";
+    for (let r = 0; r < 3; r++) ctx.fillRect(sx + 3, sy + 8 + r * 11, TILE - 7, 3);
+  }
+  if (ground === "tile_grass_flower") {
+    ctx.fillStyle = "#ff8fb3";
+    ctx.fillRect(sx + 10, sy + 10, 4, 4); ctx.fillRect(sx + 30, sy + 22, 4, 4);
+    ctx.fillStyle = "#ffd166";
+    ctx.fillRect(sx + 21, sy + 16, 4, 4);
+  }
+}
+
 function grassVariant(wx: number, wy: number): string {
   const r = hashCoords(seed, wx, wy, 0, 21) % 100;
   return r < 55 ? "tile_grass" : r < 82 ? "tile_grass_tall" : "tile_grass_flower";
@@ -440,7 +498,7 @@ function drawTile(sx: number, sy: number, wx: number, wy: number) {
     if (isFarmTile(wx, wy)) ground = "tile_plowed";
     else if (isPathTile(wx, wy)) ground = "tile_sand";
     if (imgReady(ground)) drawGroundSprite(ground, sx, sy);
-    else flatTile(sx, sy, t.type);
+    else flatGround(sx, sy, ground, wx, wy);
     if (t.type === "empty") { // a dug-out patch on the surface shows bare dirt
       if (imgReady("tile_dirt")) drawGroundSprite("tile_dirt", sx, sy);
     }
@@ -458,6 +516,18 @@ function drawTile(sx: number, sy: number, wx: number, wy: number) {
       }
     } else if (t.type === "surface_rock") {
       if (imgReady("node_rock")) drawSprite("node_rock", sx + TILE / 2, sy + ROW_H + 5, TILE * 1.3);
+      else {
+        ctx.fillStyle = "#8f8a80";
+        ctx.beginPath();
+        ctx.arc(sx + 16, sy + 26, 10, 0, Math.PI * 2);
+        ctx.arc(sx + 30, sy + 24, 12, 0, Math.PI * 2);
+        ctx.arc(sx + 23, sy + 16, 9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#b5b0a4";
+        ctx.beginPath();
+        ctx.arc(sx + 20, sy + 18, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     return;
   }
@@ -562,10 +632,23 @@ function drawPlayer(sx: number, sy: number, bob: number) {
   ctx.fillStyle = "rgba(0,0,0,.3)";
   ctx.beginPath(); ctx.ellipse(sx, sy + ROW_H - 2, 11, 4, 0, 0, Math.PI * 2); ctx.fill();
   if (imgReady(name)) {
-    drawSprite(name, sx, sy + ROW_H + 2 + bob, TILE * 0.78, flip);
+    drawSprite(name, sx, sy + ROW_H + 2 + bob, TILE * 0.62, flip);
   } else {
     drawPerson(sx, sy + 6 + bob, "#2f6fb4", "#ffd94d");
   }
+  // facing arrow at the feet: always shows which way the miner will dig
+  const ax = sx + player.fx * 19, ay = sy + ROW_H + 7 + player.fy * 9;
+  const ang = Math.atan2(player.fy, player.fx);
+  ctx.save();
+  ctx.translate(ax, ay);
+  ctx.rotate(ang);
+  ctx.fillStyle = "#ffd94d";
+  ctx.strokeStyle = "rgba(60,35,5,.8)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(7, 0); ctx.lineTo(-4, -4.5); ctx.lineTo(-4, 4.5);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.restore();
 }
 
 function render(now: number) {
@@ -616,6 +699,21 @@ function render(now: number) {
       }
     }
   }
+  // dig-target highlight: the outlined block is exactly what will be dug
+  const hl = quizOpen ? null : findDigTarget();
+  if (hl) {
+    const hs = toScreen(hl.x, hl.y);
+    const pulse = 0.55 + Math.sin(now / 240) * 0.2;
+    ctx.strokeStyle = "rgba(255,225,140," + pulse.toFixed(3) + ")";
+    ctx.lineWidth = 2.5;
+    ctx.strokeRect(hs.sx + 2, hs.sy + 2, TILE - 5, ROW_H - 5);
+    if (digProgress > 0 && digTarget === saveKey(hl.x, hl.y, player.z)) {
+      ctx.fillStyle = "rgba(0,0,0,.55)";
+      ctx.fillRect(hs.sx + 4, hs.sy - 11, TILE - 9, 7);
+      ctx.fillStyle = "#ffd94d";
+      ctx.fillRect(hs.sx + 5, hs.sy - 10, (TILE - 11) * Math.min(1, digProgress), 5);
+    }
+  }
   if (player.z > 0) {
     const dark = Math.min(0.42, player.z * 0.004);
     ctx.fillStyle = `rgba(8,4,2,${dark})`;
@@ -639,8 +737,8 @@ function updateHud() {
   const px = Math.floor(player.x), py = Math.floor(player.y);
   $("btnAct").textContent = nearNpc ? "聊天" : getDiff(save, px, py, player.z) === "pit" && player.z > 0 ? "上梯" : "下挖";
   $("hint").textContent = player.z === 0
-    ? "逛逛村庄，找 Tom 聊天 · 在草地上按下挖开始挖宝"
-    : "对着方块按住「挖」· 脚下按「下挖」继续深入 · 挖到宝箱答词开箱";
+    ? "逛逛村庄，找 Tom 聊天 · 在草地上按「下挖」开始挖宝"
+    : "金色框住的格子就是要挖的土 · 按住「挖」· 脚下「下挖」继续深入";
 }
 
 // ---------- main loop ----------
@@ -657,6 +755,13 @@ function frame(now: number) {
 }
 
 loadSprites();
+// Keep the game page from being swiped/pulled away mid-play (feedback
+// 2026-10-27: page slid out and buttons became unreachable). Sheets keep
+// their own touch behaviour so quiz options stay tappable/scrollable.
+document.addEventListener("touchmove", (e) => {
+  if (!(e.target as HTMLElement).closest(".sheet")) e.preventDefault();
+}, { passive: false });
+document.addEventListener("gesturestart", (e) => e.preventDefault());
 bindJoystick();
 bindButton("btnDig", () => (digHeld = true), () => (digHeld = false));
 bindButton("btnAct", () => actButton());

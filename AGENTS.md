@@ -42,12 +42,13 @@ npm run demo    # ASCII 地图 + 示例题目，肉眼检查生成
   宝箱与顽固石答题、村庄样本（2 栋房 + NPC Tom 双语对话）、HUD、localStorage 存档。
   构建：`npm run build:web`（esbuild 把 web/src/main.ts + core 打成 web/game.js）；
   预览：`npm run serve:web`。无头 DOM 冒烟已过，真机手感未验证。
-- [x] 美术换装（按 `assets/reference/` 五张参考图）：`tools/slice_assets.py` 切出
-  29 张精灵到 `web/assets/`（构建时生成 `web/src/sprites.ts` 内联，勿手改）；
-  渲染层已用真贴图：草地混铺/沙路/耕地、矿石节点、矿工三向、Tom、房屋、三种树
-  注：快照同步工具只能传 UTF-8 文本，`assets/reference/*.jpg` 与 `web/assets/*.png`
-  等二进制文件不在仓库里；完整美术已内联在 `web/xap-standalone.html`（自包含），
-  精灵可由 `tools/slice_assets.py` 从参考图重新切出（参考图在项目工作区，向 gami 索取）
+- [x] 美术试装一轮后被 gami 否决：**不要直接照搬参考图切片贴图**，他会另做
+  一版原创美术。当前构建 SPRITES 为空、用原创占位绘制；`tools/slice_assets.py`
+  与切好的 PNG 只作研究材料留在工作区，不打包、不进仓库（二进制也过不了
+  快照同步的 UTF-8 限制）。原创美术到位后：放 `web/assets/` 并恢复 build.mjs
+  的 sprites.ts 生成即可，渲染层的 drawSprite 通路都还在
+- [x] 试玩反馈三修：AABB 碰撞防穿模、全页手势锁定防滑出、朝向箭头＋
+  挖土目标金框高亮＋自动转向（细节见 DESIGN.md 美术定调段）
 - [ ] 下一步：真机试玩反馈后调手感数值（移动速度、挖掘时长、镜头），再搭 Cocos
   工程骨架，把 web 原型的视图层移植过去（core 不动；精灵改走图集，不再 base64）
 - [ ] 词库扩充：tier2+ 数据文件（格式同 `core/vocab.ts` 的 WordEntry）

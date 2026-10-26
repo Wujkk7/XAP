@@ -6,8 +6,8 @@
 <title>XAP — 挖宝学英语（原型）</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html, body { height:100%; background:#14100c; overflow:hidden; font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
-  #wrap { position:relative; width:100%; height:100%; max-width:480px; margin:0 auto; background:#1d1712; }
+  html, body { height:100%; background:#14100c; overflow:hidden; overscroll-behavior:none; font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  #wrap { position:relative; width:100%; height:100%; max-width:480px; margin:0 auto; background:#1d1712; touch-action:none; }
   canvas { display:block; width:100%; height:100%; touch-action:none; }
   #hud { position:absolute; top:0; left:0; right:0; padding:10px 12px; display:flex; gap:8px; flex-wrap:wrap; pointer-events:none; }
   .chip { background:rgba(20,14,8,.78); color:#f3e6cf; border:1px solid rgba(255,210,130,.35); border-radius:999px; padding:5px 11px; font-size:13px; line-height:1.25; }
@@ -16,9 +16,9 @@
   #hint { position:absolute; left:50%; bottom:118px; transform:translateX(-50%); color:#ffe9bd; background:rgba(20,14,8,.65); padding:6px 12px; border-radius:10px; font-size:13px; pointer-events:none; white-space:nowrap; }
   .btn { position:absolute; border-radius:50%; border:2px solid rgba(255,220,150,.55); background:rgba(46,32,18,.82); color:#ffe9bd; font-size:15px; font-weight:700; display:flex; align-items:center; justify-content:center; user-select:none; touch-action:none; }
   .btn:active { background:rgba(120,80,30,.9); }
-  #btnDig { right:18px; bottom:96px; width:76px; height:76px; font-size:17px; }
-  #btnAct { right:106px; bottom:44px; width:60px; height:60px; }
-  #joy { position:absolute; left:20px; bottom:36px; width:124px; height:124px; border-radius:50%; border:2px solid rgba(255,220,150,.3); background:rgba(46,32,18,.45); touch-action:none; }
+  #btnDig { right:30px; bottom:112px; width:84px; height:84px; font-size:18px; }
+  #btnAct { right:128px; bottom:54px; width:64px; height:64px; }
+  #joy { position:absolute; left:30px; bottom:48px; width:132px; height:132px; border-radius:50%; border:2px solid rgba(255,220,150,.3); background:rgba(46,32,18,.45); touch-action:none; }
   #stick { position:absolute; left:50%; top:50%; width:54px; height:54px; border-radius:50%; background:rgba(255,217,140,.85); transform:translate(-50%,-50%); }
   .sheet { position:absolute; left:0; right:0; bottom:0; background:#241a10; border-top:2px solid rgba(255,210,130,.45); border-radius:18px 18px 0 0; padding:18px 18px 26px; color:#f3e6cf; transform:translateY(105%); transition:transform .28s; z-index:5; }
   .sheet.open { transform:translateY(0); }
