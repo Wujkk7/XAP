@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>XAP — 挖宝学英语（原型）</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; background:#14100c; overflow:hidden; font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  #wrap { position:relative; width:100%; height:100%; max-width:480px; margin:0 auto; background:#1d1712; }
+  canvas { display:block; width:100%; height:100%; touch-action:none; }
+  #hud { position:absolute; top:0; left:0; right:0; padding:10px 12px; display:flex; gap:8px; flex-wrap:wrap; pointer-events:none; }
+  .chip { background:rgba(20,14,8,.78); color:#f3e6cf; border:1px solid rgba(255,210,130,.35); border-radius:999px; padding:5px 11px; font-size:13px; line-height:1.25; }
+  .chip b { color:#ffd166; font-weight:700; }
+  #toast { position:absolute; left:50%; top:64px; transform:translateX(-50%); background:rgba(20,14,8,.88); color:#ffe9bd; border:1px solid rgba(255,210,130,.5); padding:8px 14px; border-radius:12px; font-size:14px; opacity:0; transition:opacity .25s; pointer-events:none; white-space:nowrap; }
+  #hint { position:absolute; left:50%; bottom:118px; transform:translateX(-50%); color:#ffe9bd; background:rgba(20,14,8,.65); padding:6px 12px; border-radius:10px; font-size:13px; pointer-events:none; white-space:nowrap; }
+  .btn { position:absolute; border-radius:50%; border:2px solid rgba(255,220,150,.55); background:rgba(46,32,18,.82); color:#ffe9bd; font-size:15px; font-weight:700; display:flex; align-items:center; justify-content:center; user-select:none; touch-action:none; }
+  .btn:active { background:rgba(120,80,30,.9); }
+  #btnDig { right:18px; bottom:96px; width:76px; height:76px; font-size:17px; }
+  #btnAct { right:106px; bottom:44px; width:60px; height:60px; }
+  #joy { position:absolute; left:20px; bottom:36px; width:124px; height:124px; border-radius:50%; border:2px solid rgba(255,220,150,.3); background:rgba(46,32,18,.45); touch-action:none; }
+  #stick { position:absolute; left:50%; top:50%; width:54px; height:54px; border-radius:50%; background:rgba(255,217,140,.85); transform:translate(-50%,-50%); }
+  .sheet { position:absolute; left:0; right:0; bottom:0; background:#241a10; border-top:2px solid rgba(255,210,130,.45); border-radius:18px 18px 0 0; padding:18px 18px 26px; color:#f3e6cf; transform:translateY(105%); transition:transform .28s; z-index:5; }
+  .sheet.open { transform:translateY(0); }
+  .sheet h2 { font-size:15px; color:#ffd166; font-weight:700; margin-bottom:6px; }
+  .word { font-size:34px; font-weight:800; letter-spacing:.5px; }
+  .example { color:#cdbb96; font-size:14px; margin:4px 0 14px; font-style:italic; }
+  .opts { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .opt { background:#37281a; border:1.5px solid rgba(255,210,130,.35); color:#f3e6cf; border-radius:12px; padding:13px 6px; font-size:17px; text-align:center; }
+  .opt.right { background:#2e5d33; border-color:#7dd87d; }
+  .opt.wrong { background:#6e2f26; border-color:#e08a7d; }
+  .feedback { min-height:22px; margin-top:12px; font-size:14px; color:#ffe9bd; }
+  #npcText { font-size:17px; line-height:1.55; }
+  #npcText .en { color:#ffd166; font-weight:700; }
+  .sheet .closeRow { margin-top:14px; text-align:right; }
+  .pill { display:inline-block; background:#8a5a20; color:#fff2d8; border-radius:999px; padding:9px 20px; font-size:15px; font-weight:700; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+  <div id="hud">
+    <span class="chip">深度 <b id="hDepth">0m</b></span>
+    <span class="chip" id="hLayer">地表</span>
+    <span class="chip">🪙 <b id="hCoins">0</b></span>
+    <span class="chip">已掌握 <b id="hWords">0</b> 词</span>
+    <span class="chip" id="hBag">背包空</span>
+  </div>
+  <div id="toast"></div>
+  <div id="hint">左下摇杆移动 · 右下按钮挖掘</div>
+  <div id="joy"><div id="stick"></div></div>
+  <div class="btn" id="btnAct">下挖</div>
+  <div class="btn" id="btnDig">挖</div>
+
+  <div class="sheet" id="quizSheet">
+    <h2 id="qKind">宝箱 · 选对意思开箱</h2>
+    <div class="word" id="qWord">gold</div>
+    <div class="example" id="qExample"></div>
+    <div class="opts" id="qOpts"></div>
+    <div class="feedback" id="qFeedback"></div>
+  </div>
+
+  <div class="sheet" id="npcSheet">
+    <h2 id="npcName">村民</h2>
+    <div id="npcText"></div>
+    <div class="closeRow"><span class="pill" id="npcClose">继续逛</span></div>
+  </div>
+</div>
+<script src="game.js"></script>
+</body>
+</html>

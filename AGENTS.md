@@ -38,9 +38,12 @@ npm run demo    # ASCII 地图 + 示例题目，肉眼检查生成
   `vocab.ts`（L1 20 词，含手工干扰项与例句）、`quiz.ts`（宝箱答题与奖励递减）、
   `mastery.ts`（掌握度、间隔重复、顽固石、70/20/10 选词）、`save.ts`（差异存档）
 - [x] 自动化测试 13 组全绿；ASCII demo 可跑
-- [ ] 下一步（渲染里程碑）：Cocos Creator 工程骨架、竖屏斜俯瞰渲染、
-  摇杆移动与挖掘、深度切片切换、宝箱 UI——全部只准调用 core 接口
-- [ ] 村庄味道样本（手工 1 NPC + 可砍树木）随渲染里程碑一起
+- [x] Web 可玩原型（`web/`）：竖屏斜俯瞰 Canvas 渲染、摇杆移动、挖掘/下挖/上梯、
+  宝箱与顽固石答题、村庄样本（2 栋房 + NPC Tom 双语对话）、HUD、localStorage 存档。
+  构建：`npm run build:web`（esbuild 把 web/src/main.ts + core 打成 web/game.js）；
+  预览：`npm run serve:web`。无头 DOM 冒烟已过，真机手感未验证。
+- [ ] 下一步：真机试玩反馈后调手感数值（移动速度、挖掘时长、镜头），再搭 Cocos
+  工程骨架，把 web 原型的视图层移植过去（core 不动）
 - [ ] 词库扩充：tier2+ 数据文件（格式同 `core/vocab.ts` 的 WordEntry）
 
 ## 协作约定
