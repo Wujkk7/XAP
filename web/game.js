@@ -277,6 +277,7 @@
       stubborn: {},
       mastery: {},
       inventory: {},
+      seenWords: [],
       maxDepth: 0,
       pickaxeLevel: 1
     };
@@ -352,6 +353,7 @@
   } catch {
     save = newSave(SEED_STRING);
   }
+  if (!Array.isArray(save.seenWords)) save.seenWords = [];
   var seed = save.seed;
   var book = MasteryBook.deserialize(save.mastery);
   var player = { x: 0.5, y: 0.5, z: 0, fx: 0, fy: 1, moving: false };
@@ -359,6 +361,10 @@
   var digTarget = null;
   var digProgress = 0;
   var quizOpen = false;
+  var dexOpen = false;
+  function markSeen(word) {
+    if (!save.seenWords.includes(word)) save.seenWords.push(word);
+  }
   function persist() {
     save.mastery = book.serialize();
     save.inventory["coin"] = coins;
@@ -566,6 +572,7 @@
     }
     if (digProgress < 1) return;
     spawnDebris(t.x, t.y, tile.type, 14, true);
+    maybeSpawnDrop(t.x, t.y, tile.type);
     setDiff(save, t.x, t.y, player.z, "dug");
     digTarget = null;
     digProgress = 0;
@@ -592,7 +599,10 @@
     ascendGrace = 0.9;
     if (player.z === 31) toast("\u8FDB\u5165\u6D45\u5CA9\u5C42 \xB7 \u5355\u8BCD\u53D8\u96BE\u4E86");
     else if (player.z === 101) toast("\u8FDB\u5165\u5CA9\u6838\u5C42");
-    else toast("\u4E0B\u5230 " + player.z + "m");
+    else if (player.z % 10 === 0) {
+      const w = WORDS_TIER1[player.z / 10 % WORDS_TIER1.length];
+      toast("\u4E0B\u5230 " + player.z + "m \xB7 " + w.word + " " + w.meaning);
+    } else toast("\u4E0B\u5230 " + player.z + "m");
   }
   function descendOrAct() {
     if (quizOpen) return;
@@ -648,6 +658,7 @@
   }
   function startQuiz(entry, kind, x, y) {
     quizOpen = true;
+    markSeen(entry.word);
     const session = new ChestSession(entry, x * 73856093 ^ y * 19349663 ^ player.z * 83492791);
     activeQuiz = { session, entry, kind, x, y, z: player.z, everCorrect: false };
     $("qKind").textContent = kind === "chest" ? "\u5B9D\u7BB1 \xB7 \u9009\u5BF9\u610F\u601D\u5F00\u7BB1" : "\u987D\u56FA\u77F3 \xB7 \u8FD9\u4E2A\u8BCD\u53C8\u56DE\u6765\u4E86";
@@ -703,6 +714,76 @@
       activeQuiz = null;
       toast(msg);
     }, 1100);
+  }
+  var drops = [];
+  function pickDropWord() {
+    const fresh = WORDS_TIER1.filter((w) => book.get(w.word).status !== "mastered");
+    const pool = fresh.length ? fresh : WORDS_TIER1;
+    return pool[Math.random() * pool.length | 0];
+  }
+  function maybeSpawnDrop(x, y, type) {
+    if (type === "chest" || type === "stubborn") return;
+    if (Math.random() > 0.16) return;
+    drops.push({ x, y, z: player.z, entry: pickDropWord() });
+    if (drops.length > 12) drops.shift();
+  }
+  function collectDrops() {
+    for (let i = drops.length - 1; i >= 0; i--) {
+      const d = drops[i];
+      if (d.z !== player.z) continue;
+      if (Math.hypot(player.x - (d.x + 0.5), player.y - (d.y + 0.5)) < 0.55) {
+        drops.splice(i, 1);
+        markSeen(d.entry.word);
+        coins += 2;
+        toast("\u8BCD\u5361 +" + d.entry.word + " \xB7 " + d.entry.meaning + "\uFF08\u56FE\u9274 " + save.seenWords.length + "/" + WORDS_TIER1.length + "\uFF09");
+        persist();
+      }
+    }
+  }
+  function drawDrops(now) {
+    for (const d of drops) {
+      if (d.z !== player.z) continue;
+      const s = { sx: W / 2 + (d.x + 0.5 - player.x) * TILE, sy: H * 0.42 + (d.y + 0.5 - player.y) * ROW_H };
+      const bobY = Math.sin(now / 280 + d.x * 1.7 + d.y) * 2.5;
+      ctx.save();
+      ctx.translate(s.sx, s.sy - 6 + bobY);
+      ctx.fillStyle = "rgba(24,16,6,.92)";
+      ctx.strokeStyle = "#ffd94d";
+      ctx.lineWidth = 1.5;
+      const wpx = Math.max(30, d.entry.word.length * 7.5 + 12);
+      ctx.beginPath();
+      ctx.roundRect(-wpx / 2, -10, wpx, 20, 6);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#ffe9bd";
+      ctx.font = "bold 11px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(d.entry.word, 0, 4);
+      ctx.restore();
+    }
+  }
+  function renderDex() {
+    const list = $("dexList");
+    list.innerHTML = "";
+    for (const w of WORDS_TIER1) {
+      const seen = save.seenWords.includes(w.word);
+      const st = book.get(w.word).status;
+      const row = document.createElement("div");
+      row.className = "dexRow" + (seen ? "" : " locked");
+      const wEl = document.createElement("span");
+      wEl.className = "w";
+      wEl.textContent = seen ? w.word : "\uFF1F\uFF1F\uFF1F";
+      const mEl = document.createElement("span");
+      mEl.className = "m";
+      mEl.textContent = seen ? w.meaning + " \xB7 " + w.example : "\u8FD8\u6CA1\u6536\u96C6\u5230 \xB7 \u6316\u5B9D\u7BB1\u3001\u6361\u8BCD\u5361";
+      const sEl = document.createElement("span");
+      sEl.className = "st";
+      sEl.textContent = st === "mastered" ? "\u2B50 \u5DF2\u638C\u63E1" : seen ? "\u5B66\u4E60\u4E2D" : "\u672A\u6536\u96C6";
+      row.appendChild(wEl);
+      row.appendChild(mEl);
+      row.appendChild(sEl);
+      list.appendChild(row);
+    }
   }
   var particles = [];
   var ascendGrace = 0;
@@ -781,7 +862,7 @@
     return false;
   }
   function update(dt) {
-    if (quizOpen) {
+    if (quizOpen || dexOpen) {
       player.moving = false;
       return;
     }
@@ -843,6 +924,7 @@
         persist();
       }
     }
+    collectDrops();
     updateParticles(dt);
   }
   var IMG = {};
@@ -857,6 +939,12 @@
   function imgReady(name) {
     const im = IMG[name];
     return !!im && im.complete && im.naturalWidth > 0;
+  }
+  function behindAlpha(wx, wy) {
+    const dy = wy + 0.5 - player.y;
+    const dx = Math.abs(wx + 0.5 - player.x);
+    if (dy > 0.15 && dy < 1.75 && dx < 1.35) return Math.min(1, 0.32 + (dy - 0.15) * 0.55);
+    return 1;
   }
   function drawSprite(name, cx, bottom, w, flip = false) {
     const im = IMG[name];
@@ -1003,11 +1091,7 @@
         const v = hashCoords(seed, wx, wy, 0, 22) % 3;
         const name = v === 0 ? "tree_oak" : v === 1 ? "tree_pine" : "tree_apple";
         if (imgReady(name)) {
-          const dyT = wy + 0.5 - player.y;
-          const dxT = Math.abs(wx + 0.5 - player.x);
-          let alpha = 1;
-          if (dyT > 0.15 && dyT < 1.75 && dxT < 1.35) alpha = Math.min(1, 0.32 + (dyT - 0.15) * 0.55);
-          if (alpha < 1) ctx.globalAlpha = alpha;
+          ctx.globalAlpha = behindAlpha(wx, wy);
           drawSprite(name, sx + TILE / 2, sy + ROW_H + 8, TILE * 1.8);
           ctx.globalAlpha = 1;
         } else {
@@ -1019,8 +1103,11 @@
           ctx.fill();
         }
       } else if (t.type === "surface_rock") {
-        if (imgReady("node_rock")) drawSprite("node_rock", sx + TILE / 2, sy + ROW_H + 5, TILE * 1.3);
-        else {
+        if (imgReady("node_rock")) {
+          ctx.globalAlpha = behindAlpha(wx, wy);
+          drawSprite("node_rock", sx + TILE / 2, sy + ROW_H + 5, TILE * 1.12);
+          ctx.globalAlpha = 1;
+        } else {
           ctx.fillStyle = "#8f8a80";
           ctx.beginPath();
           ctx.arc(sx + 16, sy + 26, 10, 0, Math.PI * 2);
@@ -1074,15 +1161,22 @@
       ctx.fillStyle = "#5a3a10";
       ctx.fillRect(sx + TILE / 2 - 2, sy + 18, 4, 5);
     } else if (t.type === "stubborn") {
-      if (imgReady("node_ruby")) drawSprite("node_ruby", sx + TILE / 2, sy + ROW_H + 4, TILE * 1.2);
+      if (imgReady("node_ruby")) {
+        ctx.globalAlpha = behindAlpha(wx, wy);
+        drawSprite("node_ruby", sx + TILE / 2, sy + ROW_H + 4, TILE * 1.08);
+        ctx.globalAlpha = 1;
+      }
       ctx.fillStyle = "#ffe9bd";
       ctx.font = "bold 20px sans-serif";
       ctx.textAlign = "center";
       ctx.fillText("!", sx + TILE / 2, sy + 16);
     } else if (ORE_NODE[t.type]) {
       const name = ORE_NODE[t.type];
-      if (imgReady(name)) drawSprite(name, sx + TILE / 2, sy + ROW_H + 5, TILE * 1.35);
-      else {
+      if (imgReady(name)) {
+        ctx.globalAlpha = behindAlpha(wx, wy);
+        drawSprite(name, sx + TILE / 2, sy + ROW_H + 5, TILE * 1.12);
+        ctx.globalAlpha = 1;
+      } else {
         ctx.fillStyle = "#e8e8e8";
         ctx.fillRect(sx + 12, sy + 12, 8, 7);
         ctx.fillRect(sx + 26, sy + 22, 8, 7);
@@ -1254,6 +1348,7 @@
     }
     if (player.z > 0) {
       drawParticles();
+      drawDrops(now);
       const dark = Math.min(0.42, player.z * 4e-3);
       ctx.fillStyle = `rgba(8,4,2,${dark})`;
       ctx.fillRect(0, 0, W, H);
@@ -1265,7 +1360,7 @@
     const nearNpc = player.z === 0 && Math.hypot(player.x - (NPC_POS.x + 0.5), player.y - (NPC_POS.y + 0.5)) < 1.7;
     const canAscend = player.z > 0 && (getDiff(save, px, py, player.z) === "shaft" || tileAt(px, py, player.z - 1).type === "pit");
     const bag = Object.entries(save.inventory).filter(([k, v]) => k !== "coin" && v > 0).map(([k, v]) => (ORE_NAMES[k] ?? k) + "\xD7" + v).join(" ");
-    const sig = [player.z, coins, book.masteredCount(), bag, nearNpc, canAscend].join("|");
+    const sig = [player.z, coins, book.masteredCount(), save.seenWords.length, bag, nearNpc, canAscend].join("|");
     if (sig === lastHudSig) return;
     lastHudSig = sig;
     $("hDepth").textContent = player.z + "m";
@@ -1274,7 +1369,8 @@
     $("hWords").textContent = String(book.masteredCount());
     $("hBag").textContent = bag || "\u80CC\u5305\u7A7A";
     $("btnAct").textContent = nearNpc ? "\u804A\u5929" : canAscend ? "\u4E0A\u68AF" : "\u4E0B\u6316";
-    $("hint").textContent = player.z === 0 ? "\u901B\u901B\u6751\u5E84\uFF0C\u627E\u6885\u5A46\u5A46\u804A\u5929 \xB7 \u5728\u8349\u5730\u4E0A\u6309\u300C\u4E0B\u6316\u300D\u5F00\u59CB\u6316\u5B9D" : "\u91D1\u6846\u683C\u5B50\u5C31\u662F\u8981\u6316\u7684\u571F \xB7 \u6309\u4F4F\u300C\u6316\u300D\xB7 \u7AD9\u5751\u5E95\u6309\u300C\u4E0A\u68AF\u300D\u722C\u56DE\u53BB";
+    $("dexBtn").textContent = "\u56FE\u9274 " + save.seenWords.length + "/" + WORDS_TIER1.length;
+    $("hint").textContent = player.z === 0 ? "\u901B\u6751\u5E84 \xB7 \u627E\u6885\u5A46\u5A46 \xB7 \u8349\u5730\u300C\u4E0B\u6316\u300D" : "\u91D1\u6846=\u8981\u6316\u7684\u571F \xB7 \u6309\u4F4F\u300C\u6316\u300D";
   }
   var last = 0;
   function frame(now) {
@@ -1326,6 +1422,15 @@
   bindButton("btnDig", () => digHeld = true, () => digHeld = false);
   bindButton("btnAct", () => actButton());
   $("npcClose").addEventListener("click", () => $("npcSheet").classList.remove("open"));
+  $("dexBtn").addEventListener("click", () => {
+    renderDex();
+    dexOpen = true;
+    $("dexSheet").classList.add("open");
+  });
+  $("dexClose").addEventListener("click", () => {
+    dexOpen = false;
+    $("dexSheet").classList.remove("open");
+  });
   resize();
   for (const [wx, wy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
     if (tileAt(wx, wy, 0).solid) setDiff(save, wx, wy, 0, "dug");
