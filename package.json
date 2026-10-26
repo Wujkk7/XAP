@@ -1,0 +1,1 @@
+{"description":"XAP — pixel treasure-digging game with incidental English learning. Core logic is engine-free TypeScript (see DESIGN.md).","name":"xap","private":true,"scripts":{"demo":"node test/demo.ts","test":"node test/run_tests.ts"},"type":"module","version":"0.1.0"}
