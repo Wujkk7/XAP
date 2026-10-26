@@ -831,6 +831,7 @@
   }
   var last = 0;
   function frame(now) {
+    if (canvas.clientWidth && (canvas.clientWidth !== W || canvas.clientHeight !== H)) resize();
     const dt = Math.min(0.05, (now - last) / 1e3 || 0.016);
     last = now;
     update(dt);

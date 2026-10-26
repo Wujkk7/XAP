@@ -534,6 +534,8 @@ function updateHud() {
 // ---------- main loop ----------
 let last = 0;
 function frame(now: number) {
+  // Some viewers size the canvas after first paint; re-check every frame.
+  if (canvas.clientWidth && (canvas.clientWidth !== W || canvas.clientHeight !== H)) resize();
   const dt = Math.min(0.05, (now - last) / 1000 || 0.016);
   last = now;
   update(dt);
