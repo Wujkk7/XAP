@@ -1142,7 +1142,7 @@ for (const [wx, wy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
 }
 persist();
 if (!localStorage.getItem("xap-seen")) {
-  toast("欢迎来到 XAP 村 · 去地下挖宝吧");
+  toast("欢迎来到地心寻词 · 去地下挖宝吧");
   try { localStorage.setItem("xap-seen", "1"); } catch { /* ignore */ }
 }
 // test hook: lets the headless drive harness steer and inspect the game
