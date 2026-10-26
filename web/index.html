@@ -13,7 +13,13 @@
   .chip { background:rgba(20,14,8,.78); color:#f3e6cf; border:1px solid rgba(255,210,130,.35); border-radius:999px; padding:5px 11px; font-size:13px; line-height:1.25; }
   .chip b { color:#ffd166; font-weight:700; }
   #toast { position:absolute; left:50%; top:64px; transform:translateX(-50%); background:rgba(20,14,8,.88); color:#ffe9bd; border:1px solid rgba(255,210,130,.5); padding:8px 14px; border-radius:12px; font-size:14px; opacity:0; transition:opacity .25s; pointer-events:none; white-space:nowrap; }
-  #hint { position:absolute; right:10px; top:64px; max-width:56%; color:#ffe9bd; background:rgba(20,14,8,.65); padding:6px 12px; border-radius:10px; font-size:13px; pointer-events:none; text-align:right; }
+  #hint { position:absolute; left:10px; top:112px; max-width:46%; color:#ffe9bd; background:rgba(20,14,8,.55); padding:4px 8px; border-radius:8px; font-size:11px; line-height:1.5; pointer-events:none; }
+  #dexBtn { position:absolute; right:10px; top:64px; z-index:6; background:rgba(46,32,18,.82); color:#ffe9bd; border:1px solid rgba(255,210,130,.55); border-radius:999px; padding:7px 13px; font-size:13px; font-weight:700; }
+  .dexRow { display:flex; gap:8px; align-items:baseline; padding:7px 2px; border-bottom:1px dashed rgba(255,220,160,.18); }
+  .dexRow .w { font-weight:800; color:#ffe9bd; min-width:64px; }
+  .dexRow .m { color:#e8dcc2; font-size:13px; }
+  .dexRow .st { margin-left:auto; font-size:11px; color:#ffd94d; white-space:nowrap; }
+  .dexRow.locked .w, .dexRow.locked .m { color:#8d8271; }
   .btn { position:absolute; border-radius:50%; border:2px solid rgba(255,220,150,.55); background:rgba(46,32,18,.82); color:#ffe9bd; font-size:15px; font-weight:700; display:flex; align-items:center; justify-content:center; user-select:none; touch-action:none; }
   .btn:active { background:rgba(120,80,30,.9); }
   #btnDig { right:30px; bottom:112px; width:84px; height:84px; font-size:18px; }
@@ -54,10 +60,17 @@
     <span class="chip" id="hBag">背包空</span>
   </div>
   <div id="toast"></div>
+  <button id="dexBtn">图鉴 0/20</button>
   <div id="hint">左下摇杆移动 · 右下按钮挖掘</div>
   <div id="joy"><div id="stick"></div></div>
   <div class="btn" id="btnAct">下挖</div>
   <div class="btn" id="btnDig">挖</div>
+
+  <div class="sheet" id="dexSheet">
+    <h2>单词图鉴 · 挖宝收集</h2>
+    <div id="dexList" style="max-height:44vh;overflow-y:auto"></div>
+    <div class="closeRow"><span class="pill" id="dexClose">继续挖宝</span></div>
+  </div>
 
   <div class="sheet" id="quizSheet">
     <h2 id="qKind">宝箱 · 选对意思开箱</h2>

@@ -17,6 +17,7 @@ export interface GameSave {
   stubborn: Record<string, string>;
   mastery: Record<string, ReturnType<MasteryBook["serialize"]>[string]>;
   inventory: Record<string, number>;
+  seenWords: string[];
   maxDepth: number;
   pickaxeLevel: number;
 }
@@ -34,6 +35,7 @@ export function newSave(seedString: string): GameSave {
     stubborn: {},
     mastery: {},
     inventory: {},
+    seenWords: [],
     maxDepth: 0,
     pickaxeLevel: 1,
   };

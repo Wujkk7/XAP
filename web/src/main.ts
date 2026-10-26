@@ -30,6 +30,7 @@ try {
 } catch {
   save = newSave(SEED_STRING);
 }
+if (!Array.isArray(save.seenWords)) save.seenWords = [];
 const seed = save.seed;
 let book = MasteryBook.deserialize(save.mastery);
 
@@ -38,6 +39,10 @@ let coins = save.inventory["coin"] ?? 0;
 let digTarget: string | null = null;
 let digProgress = 0;
 let quizOpen = false;
+let dexOpen = false;
+function markSeen(word: string) {
+  if (!save.seenWords.includes(word)) save.seenWords.push(word);
+}
 
 function persist() {
   save.mastery = book.serialize();
@@ -212,6 +217,7 @@ function tryDig(dt: number) {
   if (digParticleTimer > 0.07) { digParticleTimer = 0; spawnDebris(t.x, t.y, tile.type, 2, false); }
   if (digProgress < 1) return;
   spawnDebris(t.x, t.y, tile.type, 14, true);
+  maybeSpawnDrop(t.x, t.y, tile.type);
 
   setDiff(save, t.x, t.y, player.z, "dug");
   digTarget = null; digProgress = 0;
@@ -241,7 +247,10 @@ function goDown(px: number, py: number) {
   ascendGrace = 0.9;
   if (player.z === 31) toast("进入浅岩层 · 单词变难了");
   else if (player.z === 101) toast("进入岩核层");
-  else toast("下到 " + player.z + "m");
+  else if (player.z % 10 === 0) {
+    const w = WORDS_TIER1[(player.z / 10) % WORDS_TIER1.length];
+    toast("下到 " + player.z + "m · " + w.word + " " + w.meaning);
+  } else toast("下到 " + player.z + "m");
 }
 
 function descendOrAct() {
@@ -312,6 +321,7 @@ function openStubbornQuiz(x: number, y: number) {
 
 function startQuiz(entry: WordEntry, kind: "chest" | "stubborn", x: number, y: number) {
   quizOpen = true;
+  markSeen(entry.word);
   const session = new ChestSession(entry, (x * 73856093) ^ (y * 19349663) ^ (player.z * 83492791));
   activeQuiz = { session, entry, kind, x, y, z: player.z, everCorrect: false };
   $("qKind").textContent = kind === "chest" ? "宝箱 · 选对意思开箱" : "顽固石 · 这个词又回来了";
@@ -372,6 +382,71 @@ function answerQuiz(i: number, btn: HTMLButtonElement) {
     activeQuiz = null;
     toast(msg);
   }, 1100);
+}
+
+// ---------- word drops & the word dex (learning presence in the core loop) ----------
+interface WordDrop { x: number; y: number; z: number; entry: WordEntry; }
+const drops: WordDrop[] = [];
+
+function pickDropWord(): WordEntry {
+  const fresh = WORDS_TIER1.filter((w) => book.get(w.word).status !== "mastered");
+  const pool = fresh.length ? fresh : WORDS_TIER1;
+  return pool[(Math.random() * pool.length) | 0];
+}
+function maybeSpawnDrop(x: number, y: number, type: string) {
+  if (type === "chest" || type === "stubborn") return;
+  if (Math.random() > 0.16) return;
+  drops.push({ x, y, z: player.z, entry: pickDropWord() });
+  if (drops.length > 12) drops.shift();
+}
+function collectDrops() {
+  for (let i = drops.length - 1; i >= 0; i--) {
+    const d = drops[i];
+    if (d.z !== player.z) continue;
+    if (Math.hypot(player.x - (d.x + 0.5), player.y - (d.y + 0.5)) < 0.55) {
+      drops.splice(i, 1);
+      markSeen(d.entry.word);
+      coins += 2;
+      toast("词卡 +" + d.entry.word + " · " + d.entry.meaning + "（图鉴 " + save.seenWords.length + "/" + WORDS_TIER1.length + "）");
+      persist();
+    }
+  }
+}
+function drawDrops(now: number) {
+  for (const d of drops) {
+    if (d.z !== player.z) continue;
+    const s = { sx: W / 2 + (d.x + 0.5 - player.x) * TILE, sy: H * 0.42 + (d.y + 0.5 - player.y) * ROW_H };
+    const bobY = Math.sin(now / 280 + d.x * 1.7 + d.y) * 2.5;
+    ctx.save();
+    ctx.translate(s.sx, s.sy - 6 + bobY);
+    ctx.fillStyle = "rgba(24,16,6,.92)";
+    ctx.strokeStyle = "#ffd94d";
+    ctx.lineWidth = 1.5;
+    const wpx = Math.max(30, d.entry.word.length * 7.5 + 12);
+    ctx.beginPath();
+    ctx.roundRect(-wpx / 2, -10, wpx, 20, 6);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#ffe9bd";
+    ctx.font = "bold 11px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(d.entry.word, 0, 4);
+    ctx.restore();
+  }
+}
+function renderDex() {
+  const list = $("dexList");
+  list.innerHTML = "";
+  for (const w of WORDS_TIER1) {
+    const seen = save.seenWords.includes(w.word);
+    const st = book.get(w.word).status;
+    const row = document.createElement("div");
+    row.className = "dexRow" + (seen ? "" : " locked");
+    const wEl = document.createElement("span"); wEl.className = "w"; wEl.textContent = seen ? w.word : "？？？";
+    const mEl = document.createElement("span"); mEl.className = "m"; mEl.textContent = seen ? w.meaning + " · " + w.example : "还没收集到 · 挖宝箱、捡词卡";
+    const sEl = document.createElement("span"); sEl.className = "st"; sEl.textContent = st === "mastered" ? "⭐ 已掌握" : seen ? "学习中" : "未收集";
+    row.appendChild(wEl); row.appendChild(mEl); row.appendChild(sEl);
+    list.appendChild(row);
+  }
 }
 
 // ---------- debris particles (Minecraft-style block break feedback) ----------
@@ -452,7 +527,7 @@ function boxCollides(cx: number, cy: number, z: number): boolean {
 }
 
 function update(dt: number) {
-  if (quizOpen) { player.moving = false; return; }
+  if (quizOpen || dexOpen) { player.moving = false; return; }
   // Safety net: if we ever end up inside a solid (bad landing, reburied
   // stone, ...), push out to the nearest free spot instead of staying stuck.
   if (boxCollides(player.x, player.y, player.z)) {
@@ -507,6 +582,7 @@ function update(dt: number) {
       persist();
     }
   }
+  collectDrops();
   updateParticles(dt);
 }
 
@@ -528,6 +604,16 @@ function imgReady(name: string): boolean {
   return !!im && im.complete && im.naturalWidth > 0;
 }
 /** Draw a sprite centered at cx, standing on `bottom`, scaled to width w. */
+/** Alpha for an entity sprite when the player passes behind it (north of
+ *  it): continuous with float distance so crossing rows never pops, and the
+ *  player is never fully swallowed by pixels (the “被图层挡住” complaint). */
+function behindAlpha(wx: number, wy: number): number {
+  const dy = (wy + 0.5) - player.y;
+  const dx = Math.abs((wx + 0.5) - player.x);
+  if (dy > 0.15 && dy < 1.75 && dx < 1.35) return Math.min(1, 0.32 + (dy - 0.15) * 0.55);
+  return 1;
+}
+
 function drawSprite(name: string, cx: number, bottom: number, w: number, flip = false) {
   const im = IMG[name];
   const h = (w * im.naturalHeight) / im.naturalWidth;
@@ -659,13 +745,7 @@ function drawTile(sx: number, sy: number, wx: number, wy: number) {
       const v = hashCoords(seed, wx, wy, 0, 22) % 3;
       const name = v === 0 ? "tree_oak" : v === 1 ? "tree_pine" : "tree_apple";
       if (imgReady(name)) {
-        // Fade the canopy as the player passes behind the tree, continuous
-        // with float distance so crossing rows never pops (felt as 穿模/卡顿).
-        const dyT = (wy + 0.5) - player.y;
-        const dxT = Math.abs((wx + 0.5) - player.x);
-        let alpha = 1;
-        if (dyT > 0.15 && dyT < 1.75 && dxT < 1.35) alpha = Math.min(1, 0.32 + (dyT - 0.15) * 0.55);
-        if (alpha < 1) ctx.globalAlpha = alpha;
+        ctx.globalAlpha = behindAlpha(wx, wy);
         drawSprite(name, sx + TILE / 2, sy + ROW_H + 8, TILE * 1.8);
         ctx.globalAlpha = 1;
       }
@@ -678,7 +758,11 @@ function drawTile(sx: number, sy: number, wx: number, wy: number) {
         ctx.fill();
       }
     } else if (t.type === "surface_rock") {
-      if (imgReady("node_rock")) drawSprite("node_rock", sx + TILE / 2, sy + ROW_H + 5, TILE * 1.3);
+      if (imgReady("node_rock")) {
+        ctx.globalAlpha = behindAlpha(wx, wy);
+        drawSprite("node_rock", sx + TILE / 2, sy + ROW_H + 5, TILE * 1.12);
+        ctx.globalAlpha = 1;
+      }
       else {
         ctx.fillStyle = "#8f8a80";
         ctx.beginPath();
@@ -734,14 +818,22 @@ function drawTile(sx: number, sy: number, wx: number, wy: number) {
     ctx.fillStyle = "#5a3a10";
     ctx.fillRect(sx + TILE / 2 - 2, sy + 18, 4, 5);
   } else if (t.type === "stubborn") {
-    if (imgReady("node_ruby")) drawSprite("node_ruby", sx + TILE / 2, sy + ROW_H + 4, TILE * 1.2);
+    if (imgReady("node_ruby")) {
+      ctx.globalAlpha = behindAlpha(wx, wy);
+      drawSprite("node_ruby", sx + TILE / 2, sy + ROW_H + 4, TILE * 1.08);
+      ctx.globalAlpha = 1;
+    }
     ctx.fillStyle = "#ffe9bd";
     ctx.font = "bold 20px sans-serif";
     ctx.textAlign = "center";
     ctx.fillText("!", sx + TILE / 2, sy + 16);
   } else if (ORE_NODE[t.type]) {
     const name = ORE_NODE[t.type];
-    if (imgReady(name)) drawSprite(name, sx + TILE / 2, sy + ROW_H + 5, TILE * 1.35);
+    if (imgReady(name)) {
+      ctx.globalAlpha = behindAlpha(wx, wy);
+      drawSprite(name, sx + TILE / 2, sy + ROW_H + 5, TILE * 1.12);
+      ctx.globalAlpha = 1;
+    }
     else {
       ctx.fillStyle = "#e8e8e8";
       ctx.fillRect(sx + 12, sy + 12, 8, 7);
@@ -913,6 +1005,7 @@ function render(now: number) {
   }
   if (player.z > 0) {
     drawParticles();
+  drawDrops(now);
     const dark = Math.min(0.42, player.z * 0.004);
     ctx.fillStyle = `rgba(8,4,2,${dark})`;
     ctx.fillRect(0, 0, W, H);
@@ -930,7 +1023,7 @@ function updateHud() {
     .filter(([k, v]) => k !== "coin" && v > 0)
     .map(([k, v]) => (ORE_NAMES[k] ?? k) + "×" + v)
     .join(" ");
-  const sig = [player.z, coins, book.masteredCount(), bag, nearNpc, canAscend].join("|");
+  const sig = [player.z, coins, book.masteredCount(), save.seenWords.length, bag, nearNpc, canAscend].join("|");
   if (sig === lastHudSig) return; // DOM writes every frame cause visible stutter
   lastHudSig = sig;
   $("hDepth").textContent = player.z + "m";
@@ -939,9 +1032,10 @@ function updateHud() {
   $("hWords").textContent = String(book.masteredCount());
   $("hBag").textContent = bag || "背包空";
   $("btnAct").textContent = nearNpc ? "聊天" : canAscend ? "上梯" : "下挖";
+  $("dexBtn").textContent = "图鉴 " + save.seenWords.length + "/" + WORDS_TIER1.length;
   $("hint").textContent = player.z === 0
-    ? "逛逛村庄，找梅婆婆聊天 · 在草地上按「下挖」开始挖宝"
-    : "金框格子就是要挖的土 · 按住「挖」· 站坑底按「上梯」爬回去";
+    ? "逛村庄 · 找梅婆婆 · 草地「下挖」"
+    : "金框=要挖的土 · 按住「挖」";
 }
 
 // ---------- main loop ----------
@@ -996,6 +1090,8 @@ bindJoystick();
 bindButton("btnDig", () => (digHeld = true), () => (digHeld = false));
 bindButton("btnAct", () => actButton());
 $("npcClose").addEventListener("click", () => $("npcSheet").classList.remove("open"));
+$("dexBtn").addEventListener("click", () => { renderDex(); dexOpen = true; $("dexSheet").classList.add("open"); });
+$("dexClose").addEventListener("click", () => { dexOpen = false; $("dexSheet").classList.remove("open"); });
 resize();
 // make sure spawn is walkable
 for (const [wx, wy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
