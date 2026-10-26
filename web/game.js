@@ -67,9 +67,12 @@
   var CAVE_CELL = 4;
   var VEIN_CELL = 3;
   function surfaceTile(seed2, x, y) {
+    if (Math.abs(x) <= 2 && Math.abs(y) <= 2) return { type: "grass", hardness: 0, stratum: 0 };
+    if (x >= 2 && x <= 8 && y >= -5 && y <= -1) return { type: "grass", hardness: 0, stratum: 0 };
+    const grove = roll(seed2, Math.floor(x / 5), Math.floor(y / 5), 0, SALT.surfaceKind + 31);
     const r = roll(seed2, x, y, 0, SALT.surfaceKind);
-    if (r < 0.06) return { type: "tree", hardness: 1, stratum: 0 };
-    if (r < 0.09) return { type: "surface_rock", hardness: 2, stratum: 0 };
+    if (grove > 0.72 && r < 0.3) return { type: "tree", hardness: 1, stratum: 0 };
+    if (r >= 0.985) return { type: "surface_rock", hardness: 2, stratum: 0 };
     if (r < 0.16) return { type: "flower", hardness: 0, stratum: 0 };
     return { type: "grass", hardness: 0, stratum: 0 };
   }
@@ -369,6 +372,7 @@
     const d = getDiff(save, wx, wy, z);
     if (d === "dug") return { type: "empty", hardness: 0, solid: false };
     if (d === "pit") return { type: "pit", hardness: 0, solid: false };
+    if (d === "shaft") return { type: "shaft", hardness: 0, solid: false };
     if (d === "stubborn") return { type: "stubborn", hardness: 2, solid: true };
     const t = getTile(seed, wx, wy, z);
     if (t.type === "empty" || t.type === "grass" || t.type === "flower") {
@@ -584,6 +588,7 @@
       setDiff(save, px, py, player.z, "dug");
       spawnDebris(px, py, landing.type, 12, true);
     }
+    if (tileAt(px, py, player.z).type === "empty") setDiff(save, px, py, player.z, "shaft");
     ascendGrace = 0.9;
     if (player.z === 31) toast("\u8FDB\u5165\u6D45\u5CA9\u5C42 \xB7 \u5355\u8BCD\u53D8\u96BE\u4E86");
     else if (player.z === 101) toast("\u8FDB\u5165\u5CA9\u6838\u5C42");
@@ -597,8 +602,8 @@
       return;
     }
     const px = Math.floor(player.x), py = Math.floor(player.y);
-    const here = getDiff(save, px, py, player.z);
-    if (here === "pit" && player.z > 0) {
+    const canAscend = player.z > 0 && (getDiff(save, px, py, player.z) === "shaft" || tileAt(px, py, player.z - 1).type === "pit");
+    if (canAscend) {
       player.z -= 1;
       ascendGrace = 0.9;
       toast("\u56DE\u5230 " + player.z + "m");
@@ -703,6 +708,7 @@
   var ascendGrace = 0;
   var lastTileKey = "";
   var digParticleTimer = 0;
+  var stepTimer = 0;
   var DEBRIS_COLORS = {
     dirt: ["#8a613c", "#a0764a", "#6e4c2c"],
     sandstone: ["#c9b083", "#b89a68", "#dcc493"],
@@ -756,8 +762,8 @@
   }
   function drawParticles() {
     for (const pt of particles) {
-      const sx = view.W / 2 + (pt.x - player.x) * TILE;
-      const sy = view.H * 0.42 + (pt.y - player.y) * ROW_H;
+      const sx = W / 2 + (pt.x - player.x) * TILE;
+      const sy = H * 0.42 + (pt.y - player.y) * ROW_H;
       ctx.globalAlpha = Math.max(0, 1 - pt.life / pt.maxLife);
       ctx.fillStyle = pt.color;
       ctx.fillRect(sx - pt.size / 2, sy - pt.size / 2, pt.size, pt.size);
@@ -803,6 +809,22 @@
       const ny = player.y + v.y * speed * dt;
       if (!boxCollides(nx, player.y, player.z)) player.x = nx;
       if (!boxCollides(player.x, ny, player.z)) player.y = ny;
+    }
+    if (player.moving) {
+      stepTimer += dt;
+      if (stepTimer > 0.14) {
+        stepTimer = 0;
+        particles.push({
+          x: player.x + (Math.random() - 0.5) * 0.34,
+          y: player.y + 0.34,
+          vx: (Math.random() - 0.5) * 0.5,
+          vy: -0.35 - Math.random() * 0.4,
+          life: 0,
+          maxLife: 0.32 + Math.random() * 0.2,
+          color: player.z === 0 ? "#a9c48a" : "#9a8a72",
+          size: 2 + Math.random() * 2
+        });
+      }
     }
     if (digHeld) tryDig(dt);
     else {
@@ -934,12 +956,21 @@
   function drawTile(sx, sy, wx, wy) {
     const t = tileAt(wx, wy, player.z);
     if (player.z === 0) {
-      let ground = grassVariant(wx, wy);
-      if (t.type === "flower") ground = "tile_grass_flower";
+      let ground = "tile_grass";
       if (isFarmTile(wx, wy)) ground = "tile_plowed";
       else if (isPathTile(wx, wy)) ground = "tile_sand";
       if (imgReady(ground)) drawGroundSprite(ground, sx, sy);
       else flatGround(sx, sy, ground, wx, wy);
+      if (ground === "tile_grass") {
+        const gv = grassVariant(wx, wy);
+        const decal = t.type === "flower" ? "tile_grass_flower" : gv !== "tile_grass" ? gv : null;
+        if (decal && imgReady(decal)) {
+          const dw = TILE * 0.62, dh = ROW_H * 0.62;
+          ctx.globalAlpha = 0.95;
+          ctx.drawImage(IMG[decal], sx + TILE - dw - 2, sy + ROW_H - dh - 1, dw, dh);
+          ctx.globalAlpha = 1;
+        }
+      }
       if (t.type === "empty") {
         if (imgReady("tile_dirt")) drawGroundSprite("tile_dirt", sx, sy);
       }
@@ -972,8 +1003,11 @@
         const v = hashCoords(seed, wx, wy, 0, 22) % 3;
         const name = v === 0 ? "tree_oak" : v === 1 ? "tree_pine" : "tree_apple";
         if (imgReady(name)) {
-          const behindTree = wy === Math.floor(player.y) + 1 && Math.abs(wx - Math.floor(player.x)) <= 1;
-          if (behindTree) ctx.globalAlpha = 0.45;
+          const dyT = wy + 0.5 - player.y;
+          const dxT = Math.abs(wx + 0.5 - player.x);
+          let alpha = 1;
+          if (dyT > 0.15 && dyT < 1.75 && dxT < 1.35) alpha = Math.min(1, 0.32 + (dyT - 0.15) * 0.55);
+          if (alpha < 1) ctx.globalAlpha = alpha;
           drawSprite(name, sx + TILE / 2, sy + ROW_H + 8, TILE * 1.8);
           ctx.globalAlpha = 1;
         } else {
@@ -1003,7 +1037,7 @@
     }
     const stratum = stratumAt(player.z);
     const baseName = stratum.id === 1 ? "tile_dirt" : "tile_rock";
-    const walkable = t.type === "empty" || t.type === "pit";
+    const walkable = t.type === "empty" || t.type === "pit" || t.type === "shaft";
     if (imgReady(baseName)) drawGroundSprite(baseName, sx, sy);
     else flatTile(sx, sy, t.type);
     ctx.fillStyle = STRATUM_TINT[stratum.id];
@@ -1019,6 +1053,16 @@
       ctx.fill();
       ctx.fillStyle = "#c9a86a";
       ctx.fillRect(sx + TILE / 2 - 2, sy + 4, 4, ROW_H - 8);
+    } else if (t.type === "shaft") {
+      ctx.fillStyle = "rgba(255,240,200,0.14)";
+      ctx.beginPath();
+      ctx.ellipse(sx + TILE / 2, sy + 8, 13, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#c9a86a";
+      ctx.fillRect(sx + TILE / 2 - 7, sy + 2, 3, ROW_H - 4);
+      ctx.fillRect(sx + TILE / 2 + 4, sy + 2, 3, ROW_H - 4);
+      ctx.fillRect(sx + TILE / 2 - 7, sy + 11, 14, 3);
+      ctx.fillRect(sx + TILE / 2 - 7, sy + 21, 14, 3);
     } else if (t.type === "chest") {
       ctx.fillStyle = "#7a4d1c";
       ctx.fillRect(sx + 5, sy + 8, TILE - 11, 22);
@@ -1107,11 +1151,17 @@
     ctx.beginPath();
     ctx.ellipse(sx, sy + ROW_H - 2, 11, 4, 0, 0, Math.PI * 2);
     ctx.fill();
+    const tilt = player.moving ? Math.sin(Date.now() / 92) * 0.06 : 0;
+    ctx.save();
+    ctx.translate(sx, sy + ROW_H + 3);
+    ctx.rotate(tilt);
+    ctx.translate(-sx, -(sy + ROW_H + 3));
     if (imgReady(name)) {
       drawSprite(name, sx, sy + ROW_H + 2 + bob, TILE * 0.62, flip);
     } else {
       drawPerson(sx, sy + 6 + bob, "#2f6fb4", "#ffd94d");
     }
+    ctx.restore();
     const ax = sx + player.fx * 19, ay = sy + ROW_H + 7 + player.fy * 9;
     const ang = Math.atan2(player.fy, player.fx);
     ctx.save();
@@ -1147,15 +1197,16 @@
         drawTile(sx, sy, wx, wy);
       }
       if (player.z === 0 && wy === -3) {
-        const ptx = Math.floor(player.x), pty = Math.floor(player.y);
-        const behindRed = pty <= -4 && ptx >= 3 && ptx <= 4;
-        const behindBlue = pty <= -4 && ptx >= 6 && ptx <= 7;
+        const houseAlpha = (hx) => {
+          if (player.y >= -2.4 || player.x < hx - 0.4 || player.x > hx + 2.4) return 1;
+          return Math.min(1, 0.35 + (-2.4 - player.y) * 0.5);
+        };
         const h1 = toScreen(3, -3);
-        if (behindRed) ctx.globalAlpha = 0.45;
+        ctx.globalAlpha = houseAlpha(3);
         drawHouseSprite(h1.sx, h1.sy, "house_red");
         ctx.globalAlpha = 1;
         const h2 = toScreen(6, -3);
-        if (behindBlue) ctx.globalAlpha = 0.45;
+        ctx.globalAlpha = houseAlpha(6);
         drawHouseSprite(h2.sx, h2.sy, "house_blue");
         ctx.globalAlpha = 1;
       }
@@ -1173,7 +1224,7 @@
       }
       if (Math.floor(player.y) === wy || player.y > wy && player.y < wy + 1) {
         const p = toScreen(player.x, player.y);
-        const bob = player.moving ? Math.sin(now / 90) * 2 : 0;
+        const bob = player.moving ? Math.sin(now / 78) * 2.4 : 0;
         const topY = p.sy - (player.y - Math.floor(player.y)) * ROW_H;
         drawPlayer(p.sx + TILE / 2, topY, bob);
         if (digHeld && digTarget) {
@@ -1208,17 +1259,22 @@
       ctx.fillRect(0, 0, W, H);
     }
   }
+  var lastHudSig = "";
   function updateHud() {
+    const px = Math.floor(player.x), py = Math.floor(player.y);
+    const nearNpc = player.z === 0 && Math.hypot(player.x - (NPC_POS.x + 0.5), player.y - (NPC_POS.y + 0.5)) < 1.7;
+    const canAscend = player.z > 0 && (getDiff(save, px, py, player.z) === "shaft" || tileAt(px, py, player.z - 1).type === "pit");
+    const bag = Object.entries(save.inventory).filter(([k, v]) => k !== "coin" && v > 0).map(([k, v]) => (ORE_NAMES[k] ?? k) + "\xD7" + v).join(" ");
+    const sig = [player.z, coins, book.masteredCount(), bag, nearNpc, canAscend].join("|");
+    if (sig === lastHudSig) return;
+    lastHudSig = sig;
     $("hDepth").textContent = player.z + "m";
     $("hLayer").textContent = player.z === 0 ? "\u5730\u8868 \xB7 \u6751\u5E84" : stratumAt(player.z).name + " L" + stratumAt(player.z).id;
     $("hCoins").textContent = String(coins);
     $("hWords").textContent = String(book.masteredCount());
-    const bag = Object.entries(save.inventory).filter(([k, v]) => k !== "coin" && v > 0).map(([k, v]) => (ORE_NAMES[k] ?? k) + "\xD7" + v).join(" ");
     $("hBag").textContent = bag || "\u80CC\u5305\u7A7A";
-    const nearNpc = player.z === 0 && Math.hypot(player.x - (NPC_POS.x + 0.5), player.y - (NPC_POS.y + 0.5)) < 1.7;
-    const px = Math.floor(player.x), py = Math.floor(player.y);
-    $("btnAct").textContent = nearNpc ? "\u804A\u5929" : getDiff(save, px, py, player.z) === "pit" && player.z > 0 ? "\u4E0A\u68AF" : "\u4E0B\u6316";
-    $("hint").textContent = player.z === 0 ? "\u901B\u901B\u6751\u5E84\uFF0C\u627E\u6885\u5A46\u5A46\u804A\u5929 \xB7 \u5728\u8349\u5730\u4E0A\u6309\u300C\u4E0B\u6316\u300D\u5F00\u59CB\u6316\u5B9D" : "\u91D1\u8272\u6846\u4F4F\u7684\u683C\u5B50\u5C31\u662F\u8981\u6316\u7684\u571F \xB7 \u6309\u4F4F\u300C\u6316\u300D\xB7 \u811A\u4E0B\u300C\u4E0B\u6316\u300D\u7EE7\u7EED\u6DF1\u5165";
+    $("btnAct").textContent = nearNpc ? "\u804A\u5929" : canAscend ? "\u4E0A\u68AF" : "\u4E0B\u6316";
+    $("hint").textContent = player.z === 0 ? "\u901B\u901B\u6751\u5E84\uFF0C\u627E\u6885\u5A46\u5A46\u804A\u5929 \xB7 \u5728\u8349\u5730\u4E0A\u6309\u300C\u4E0B\u6316\u300D\u5F00\u59CB\u6316\u5B9D" : "\u91D1\u6846\u683C\u5B50\u5C31\u662F\u8981\u6316\u7684\u571F \xB7 \u6309\u4F4F\u300C\u6316\u300D\xB7 \u7AD9\u5751\u5E95\u6309\u300C\u4E0A\u68AF\u300D\u722C\u56DE\u53BB";
   }
   var last = 0;
   function frame(now) {
@@ -1242,6 +1298,10 @@
       if (eb) {
         eb.style.display = "block";
         eb.textContent = "\u51FA\u9519\u5DF2\u81EA\u52A8\u6062\u590D: " + String(err).slice(0, 90);
+        window.clearTimeout(window.__errTimer);
+        window.__errTimer = window.setTimeout(() => {
+          eb.style.display = "none";
+        }, 4e3);
       }
     }
     requestAnimationFrame(frame);
