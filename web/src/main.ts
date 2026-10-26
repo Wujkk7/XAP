@@ -53,6 +53,7 @@ function tileAt(wx: number, wy: number, z: number): RTile {
   const d = getDiff(save, wx, wy, z);
   if (d === "dug") return { type: "empty", hardness: 0, solid: false };
   if (d === "pit") return { type: "pit", hardness: 0, solid: false };
+  if (d === "shaft") return { type: "shaft", hardness: 0, solid: false };
   if (d === "stubborn") return { type: "stubborn", hardness: 2, solid: true };
   const t: Tile = getTile(seed, wx, wy, z);
   if (t.type === "empty" || t.type === "grass" || t.type === "flower") {
@@ -236,6 +237,7 @@ function goDown(px: number, py: number) {
     setDiff(save, px, py, player.z, "dug");
     spawnDebris(px, py, landing.type, 12, true);
   }
+  if (tileAt(px, py, player.z).type === "empty") setDiff(save, px, py, player.z, "shaft");
   ascendGrace = 0.9;
   if (player.z === 31) toast("进入浅岩层 · 单词变难了");
   else if (player.z === 101) toast("进入岩核层");
@@ -249,8 +251,11 @@ function descendOrAct() {
   if (player.z === 0 && dNpc < 1.7) { talkToNpc(); return; }
 
   const px = Math.floor(player.x), py = Math.floor(player.y);
-  const here = getDiff(save, px, py, player.z);
-  if (here === "pit" && player.z > 0) {
+  // Climb back up: you are at the bottom of a shaft (marked "shaft"), or the
+  // tile directly above you is a pit mouth (shafts dug before shaft marks
+  // existed — old saves land on plain "dug" tiles and must still get out).
+  const canAscend = player.z > 0 && (getDiff(save, px, py, player.z) === "shaft" || tileAt(px, py, player.z - 1).type === "pit");
+  if (canAscend) {
     player.z -= 1;
     ascendGrace = 0.9;
     toast("回到 " + player.z + "m");
@@ -375,6 +380,7 @@ const particles: Particle[] = [];
 let ascendGrace = 0; // seconds after a level change during which pit walk-in is ignored
 let lastTileKey = "";
 let digParticleTimer = 0;
+let stepTimer = 0;
 
 const DEBRIS_COLORS: Record<string, string[]> = {
   dirt: ["#8a613c", "#a0764a", "#6e4c2c"],
@@ -423,8 +429,8 @@ function updateParticles(dt: number) {
 }
 function drawParticles() {
   for (const pt of particles) {
-    const sx = view.W / 2 + (pt.x - player.x) * TILE;
-    const sy = view.H * 0.42 + (pt.y - player.y) * ROW_H;
+    const sx = W / 2 + (pt.x - player.x) * TILE;
+    const sy = H * 0.42 + (pt.y - player.y) * ROW_H;
     ctx.globalAlpha = Math.max(0, 1 - pt.life / pt.maxLife);
     ctx.fillStyle = pt.color;
     ctx.fillRect(sx - pt.size / 2, sy - pt.size / 2, pt.size, pt.size);
@@ -470,6 +476,18 @@ function update(dt: number) {
     // full-AABB, axis separated: the whole body box must stay out of solids
     if (!boxCollides(nx, player.y, player.z)) player.x = nx;
     if (!boxCollides(player.x, ny, player.z)) player.y = ny;
+  }
+  if (player.moving) {
+    stepTimer += dt;
+    if (stepTimer > 0.14) {
+      stepTimer = 0;
+      particles.push({
+        x: player.x + (Math.random() - 0.5) * 0.34, y: player.y + 0.34,
+        vx: (Math.random() - 0.5) * 0.5, vy: -0.35 - Math.random() * 0.4,
+        life: 0, maxLife: 0.32 + Math.random() * 0.2,
+        color: player.z === 0 ? "#a9c48a" : "#9a8a72", size: 2 + Math.random() * 2,
+      });
+    }
   }
   if (digHeld) tryDig(dt);
   else { digTarget = null; digProgress = 0; }
@@ -598,12 +616,24 @@ function drawTile(sx: number, sy: number, wx: number, wy: number) {
 
   if (player.z === 0) {
     // ----- surface -----
-    let ground = grassVariant(wx, wy);
-    if (t.type === "flower") ground = "tile_grass_flower";
+    // One unified grass base everywhere; tall/flower variants are small
+    // decals on top, so the ground reads as one flat plain you can run on
+    // (full-tile texture swaps had visible patch seams).
+    let ground = "tile_grass";
     if (isFarmTile(wx, wy)) ground = "tile_plowed";
     else if (isPathTile(wx, wy)) ground = "tile_sand";
     if (imgReady(ground)) drawGroundSprite(ground, sx, sy);
     else flatGround(sx, sy, ground, wx, wy);
+    if (ground === "tile_grass") {
+      const gv = grassVariant(wx, wy);
+      const decal = t.type === "flower" ? "tile_grass_flower" : gv !== "tile_grass" ? gv : null;
+      if (decal && imgReady(decal)) {
+        const dw = TILE * 0.62, dh = ROW_H * 0.62;
+        ctx.globalAlpha = 0.95;
+        ctx.drawImage(IMG[decal], sx + TILE - dw - 2, sy + ROW_H - dh - 1, dw, dh);
+        ctx.globalAlpha = 1;
+      }
+    }
     if (t.type === "empty") { // a dug-out patch on the surface shows bare dirt
       if (imgReady("tile_dirt")) drawGroundSprite("tile_dirt", sx, sy);
     }
@@ -629,10 +659,13 @@ function drawTile(sx: number, sy: number, wx: number, wy: number) {
       const v = hashCoords(seed, wx, wy, 0, 22) % 3;
       const name = v === 0 ? "tree_oak" : v === 1 ? "tree_pine" : "tree_apple";
       if (imgReady(name)) {
-        // Fade the canopy when the player walks behind the tree, so he is
-        // never swallowed by pixels he cannot collide with (felt as 穿模).
-        const behindTree = wy === Math.floor(player.y) + 1 && Math.abs(wx - Math.floor(player.x)) <= 1;
-        if (behindTree) ctx.globalAlpha = 0.45;
+        // Fade the canopy as the player passes behind the tree, continuous
+        // with float distance so crossing rows never pops (felt as 穿模/卡顿).
+        const dyT = (wy + 0.5) - player.y;
+        const dxT = Math.abs((wx + 0.5) - player.x);
+        let alpha = 1;
+        if (dyT > 0.15 && dyT < 1.75 && dxT < 1.35) alpha = Math.min(1, 0.32 + (dyT - 0.15) * 0.55);
+        if (alpha < 1) ctx.globalAlpha = alpha;
         drawSprite(name, sx + TILE / 2, sy + ROW_H + 8, TILE * 1.8);
         ctx.globalAlpha = 1;
       }
@@ -665,7 +698,7 @@ function drawTile(sx: number, sy: number, wx: number, wy: number) {
   // ----- underground -----
   const stratum = stratumAt(player.z);
   const baseName = stratum.id === 1 ? "tile_dirt" : "tile_rock";
-  const walkable = t.type === "empty" || t.type === "pit";
+  const walkable = t.type === "empty" || t.type === "pit" || t.type === "shaft";
   if (imgReady(baseName)) drawGroundSprite(baseName, sx, sy);
   else flatTile(sx, sy, t.type);
   ctx.fillStyle = STRATUM_TINT[stratum.id];
@@ -681,6 +714,15 @@ function drawTile(sx: number, sy: number, wx: number, wy: number) {
     ctx.fill();
     ctx.fillStyle = "#c9a86a";
     ctx.fillRect(sx + TILE / 2 - 2, sy + 4, 4, ROW_H - 8);
+  } else if (t.type === "shaft") {
+    // Bottom of a shaft: light spilling from the opening above + the ladder.
+    ctx.fillStyle = "rgba(255,240,200,0.14)";
+    ctx.beginPath(); ctx.ellipse(sx + TILE / 2, sy + 8, 13, 6, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#c9a86a";
+    ctx.fillRect(sx + TILE / 2 - 7, sy + 2, 3, ROW_H - 4);
+    ctx.fillRect(sx + TILE / 2 + 4, sy + 2, 3, ROW_H - 4);
+    ctx.fillRect(sx + TILE / 2 - 7, sy + 11, 14, 3);
+    ctx.fillRect(sx + TILE / 2 - 7, sy + 21, 14, 3);
   } else if (t.type === "chest") {
     ctx.fillStyle = "#7a4d1c";
     ctx.fillRect(sx + 5, sy + 8, TILE - 11, 22);
@@ -761,11 +803,19 @@ function drawPlayer(sx: number, sy: number, bob: number) {
   else if (player.fx !== 0) { name = "miner_side"; flip = player.fx < 0; }
   ctx.fillStyle = "rgba(0,0,0,.3)";
   ctx.beginPath(); ctx.ellipse(sx, sy + ROW_H - 2, 11, 4, 0, 0, Math.PI * 2); ctx.fill();
+  // Run cycle: the whole body sways/tilts while moving (the sprite sheet has
+  // a single frame per direction, so the motion sells the run).
+  const tilt = player.moving ? Math.sin(Date.now() / 92) * 0.06 : 0;
+  ctx.save();
+  ctx.translate(sx, sy + ROW_H + 3);
+  ctx.rotate(tilt);
+  ctx.translate(-sx, -(sy + ROW_H + 3));
   if (imgReady(name)) {
     drawSprite(name, sx, sy + ROW_H + 2 + bob, TILE * 0.62, flip);
   } else {
     drawPerson(sx, sy + 6 + bob, "#2f6fb4", "#ffd94d");
   }
+  ctx.restore();
   // facing arrow at the feet: always shows which way the miner will dig
   const ax = sx + player.fx * 19, ay = sy + ROW_H + 7 + player.fy * 9;
   const ang = Math.atan2(player.fy, player.fx);
@@ -801,15 +851,16 @@ function render(now: number) {
     if (player.z === 0 && wy === -3) {
       // Fade a house while the player walks behind it so he never vanishes
       // into pixels he cannot collide with.
-      const ptx = Math.floor(player.x), pty = Math.floor(player.y);
-      const behindRed = pty <= -4 && ptx >= 3 && ptx <= 4;
-      const behindBlue = pty <= -4 && ptx >= 6 && ptx <= 7;
+      const houseAlpha = (hx: number) => {
+        if (player.y >= -2.4 || player.x < hx - 0.4 || player.x > hx + 2.4) return 1;
+        return Math.min(1, 0.35 + (-2.4 - player.y) * 0.5);
+      };
       const h1 = toScreen(3, -3);
-      if (behindRed) ctx.globalAlpha = 0.45;
+      ctx.globalAlpha = houseAlpha(3);
       drawHouseSprite(h1.sx, h1.sy, "house_red");
       ctx.globalAlpha = 1;
       const h2 = toScreen(6, -3);
-      if (behindBlue) ctx.globalAlpha = 0.45;
+      ctx.globalAlpha = houseAlpha(6);
       drawHouseSprite(h2.sx, h2.sy, "house_blue");
       ctx.globalAlpha = 1;
     }
@@ -827,7 +878,7 @@ function render(now: number) {
     }
     if (Math.floor(player.y) === wy || (player.y > wy && player.y < wy + 1)) {
       const p = toScreen(player.x, player.y);
-      const bob = player.moving ? Math.sin(now / 90) * 2 : 0;
+      const bob = player.moving ? Math.sin(now / 78) * 2.4 : 0;
       // Anchor the sprite to the TOP of the tile row the player stands in:
       // p.sy is the screen y of the player's exact position (mid-tile at
       // spawn), so passing it straight to drawPlayer pushed the sprite half
@@ -870,22 +921,27 @@ function render(now: number) {
 
 
 // ---------- HUD ----------
+let lastHudSig = "";
 function updateHud() {
-  $("hDepth").textContent = player.z + "m";
-  $("hLayer").textContent = player.z === 0 ? "地表 · 村庄" : stratumAt(player.z).name + " L" + stratumAt(player.z).id;
-  $("hCoins").textContent = String(coins);
-  $("hWords").textContent = String(book.masteredCount());
+  const px = Math.floor(player.x), py = Math.floor(player.y);
+  const nearNpc = player.z === 0 && Math.hypot(player.x - (NPC_POS.x + 0.5), player.y - (NPC_POS.y + 0.5)) < 1.7;
+  const canAscend = player.z > 0 && (getDiff(save, px, py, player.z) === "shaft" || tileAt(px, py, player.z - 1).type === "pit");
   const bag = Object.entries(save.inventory)
     .filter(([k, v]) => k !== "coin" && v > 0)
     .map(([k, v]) => (ORE_NAMES[k] ?? k) + "×" + v)
     .join(" ");
+  const sig = [player.z, coins, book.masteredCount(), bag, nearNpc, canAscend].join("|");
+  if (sig === lastHudSig) return; // DOM writes every frame cause visible stutter
+  lastHudSig = sig;
+  $("hDepth").textContent = player.z + "m";
+  $("hLayer").textContent = player.z === 0 ? "地表 · 村庄" : stratumAt(player.z).name + " L" + stratumAt(player.z).id;
+  $("hCoins").textContent = String(coins);
+  $("hWords").textContent = String(book.masteredCount());
   $("hBag").textContent = bag || "背包空";
-  const nearNpc = player.z === 0 && Math.hypot(player.x - (NPC_POS.x + 0.5), player.y - (NPC_POS.y + 0.5)) < 1.7;
-  const px = Math.floor(player.x), py = Math.floor(player.y);
-  $("btnAct").textContent = nearNpc ? "聊天" : getDiff(save, px, py, player.z) === "pit" && player.z > 0 ? "上梯" : "下挖";
+  $("btnAct").textContent = nearNpc ? "聊天" : canAscend ? "上梯" : "下挖";
   $("hint").textContent = player.z === 0
     ? "逛逛村庄，找梅婆婆聊天 · 在草地上按「下挖」开始挖宝"
-    : "金色框住的格子就是要挖的土 · 按住「挖」· 脚下「下挖」继续深入";
+    : "金框格子就是要挖的土 · 按住「挖」· 站坑底按「上梯」爬回去";
 }
 
 // ---------- main loop ----------
@@ -909,7 +965,12 @@ function frame(now: number) {
     keys.clear();
     joy.active = false; joy.dx = 0; joy.dy = 0;
     const eb = $("errbar");
-    if (eb) { eb.style.display = "block"; eb.textContent = "出错已自动恢复: " + String(err).slice(0, 90); }
+    if (eb) {
+      eb.style.display = "block";
+      eb.textContent = "出错已自动恢复: " + String(err).slice(0, 90);
+      window.clearTimeout((window as any).__errTimer);
+      (window as any).__errTimer = window.setTimeout(() => { eb.style.display = "none"; }, 4000);
+    }
   }
   requestAnimationFrame(frame);
 }

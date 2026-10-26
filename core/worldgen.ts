@@ -36,9 +36,16 @@ const CAVE_CELL = 4; // cave pockets are rolled per 4x4 cell so they form blobs
 const VEIN_CELL = 3; // ore veins likewise
 
 function surfaceTile(seed: number, x: number, y: number): Tile {
+  // Clearings: spawn surroundings and the village plot stay obstacle-free,
+  // so the player can always run on flat ground there.
+  if (Math.abs(x) <= 2 && Math.abs(y) <= 2) return { type: "grass", hardness: 0, stratum: 0 };
+  if (x >= 2 && x <= 8 && y >= -5 && y <= -1) return { type: "grass", hardness: 0, stratum: 0 };
+  // Trees grow in groves (one roll per 5x5 cell) instead of uniform scatter:
+  // most of the surface is open, run-friendly grassland between the groves.
+  const grove = roll(seed, Math.floor(x / 5), Math.floor(y / 5), 0, SALT.surfaceKind + 31);
   const r = roll(seed, x, y, 0, SALT.surfaceKind);
-  if (r < 0.06) return { type: "tree", hardness: 1, stratum: 0 };
-  if (r < 0.09) return { type: "surface_rock", hardness: 2, stratum: 0 };
+  if (grove > 0.72 && r < 0.30) return { type: "tree", hardness: 1, stratum: 0 };
+  if (r >= 0.985) return { type: "surface_rock", hardness: 2, stratum: 0 };
   if (r < 0.16) return { type: "flower", hardness: 0, stratum: 0 };
   return { type: "grass", hardness: 0, stratum: 0 };
 }
