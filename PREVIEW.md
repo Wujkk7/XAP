@@ -7,10 +7,11 @@
 
 ## 当前版本
 
-- 游戏源码：`Wujkk7/XAP`，提交 `2e8e6a9ba15da8194d223b264c9ad1f4e25a5f95`。
+- 游戏源码：`Wujkk7/XAP`，提交 `93ffa453a5468fa557316003d3cdb5ea278b0ab8`。
+- 第一次视角更新：48×32 斜俯视地面、约 15 格横向视野、满画布地图与边缘浮层；沿用原创素材，暂保留竖屏，旧存档兼容。
 - 运行内容：Creator 3.8.8 的 Web Mobile 构建，与本地验证版本相同。
 - 站点 ID：`appgprj_6ae05ff3aefc8191839dcfc092c6aa7f`。
-- 发布版本：`appgprj_6ae05ff3aefc8191839dcfc092c6aa7f~appgver_7a4414c9b62c8191a56b5bc36da96bc2`。
+- 发布版本：`appgprj_6ae05ff3aefc8191839dcfc092c6aa7f~appgver_22dde159f62c81919f662fd5ffc8ae79`。
 - Site 本地工作目录：`.local-sites/xap-preview/`，其 `.openai/hosting.json` 保存站点身份；该目录不进入游戏源码仓库。
 - 部署状态：已成功发布；构建内 `source-version.json` 记录对应的游戏源码提交。
 
