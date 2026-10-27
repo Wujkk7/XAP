@@ -18,11 +18,11 @@ export class GameTuning extends Component {
   @property({ displayName: "地块宽度（设计像素）", min: 36, max: 120, step: 1 })
   tileSize = 48;
 
-  @property({ displayName: "地块行高（设计像素）", min: 20, max: 100, step: 1 })
-  rowHeight = 32;
+  @property({ displayName: "前上方镜头俯角（度）", min: 20, max: 60, step: 1 })
+  cameraPitch = 25;
 
   @property({ displayName: "角色脚底位置（画面高度比例）", min: 0.4, max: 0.65, step: 0.01 })
-  cameraAnchor = 0.56;
+  cameraAnchor = 0.52;
 
   @property({ type: JsonAsset, displayName: "开局内容文件" })
   worldContent: JsonAsset | null = null;

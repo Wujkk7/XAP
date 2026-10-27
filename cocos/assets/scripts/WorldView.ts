@@ -9,10 +9,11 @@ import type { GameTuning } from "../data/exposed-variables/GameTuning";
 import { VILLAGE } from "../data/external-files/Village";
 import { ART_NAMES, ORE_ART, STRATUM_TINT, DEBRIS_COLORS } from "../data/resource-config/ArtCatalog";
 import { UI_COLORS } from "../data/resource-config/TileStyles";
+import { obliqueProjection, occlusionAlpha } from "./ObliqueProjection";
 
 const { ccclass } = _decorator;
 interface SpriteSlot { sprite: Sprite; transform: UITransform; opacity: UIOpacity; label: Label | null }
-interface Entity { art: string; x: number; y: number; width: number; alpha?: number; flip?: boolean; angle?: number; label?: string }
+interface Entity { art: string; x: number; y: number; width: number; flip?: boolean; angle?: number; label?: string }
 interface Particle { x: number; y: number; z: number; vx: number; vy: number; age: number; life: number; size: number; color: string }
 
 @ccclass("WorldView")
@@ -123,7 +124,13 @@ export class WorldView extends Component {
     if (!this.art.size) return;
     const p = expedition.slot.position;
     this.elapsed += dt;
-    const size = tuning.tileSize, row = tuning.rowHeight;
+    const size = tuning.tileSize;
+    const projection = obliqueProjection(size, tuning.cameraPitch);
+    const row = projection.rowHeight;
+    const artHeight = (art: string, width: number) => {
+      const original = this.art.get(art)!.originalSize;
+      return width * original.height / original.width * projection.uprightScale;
+    };
     const width = this.node.getComponent(UITransform)!.width;
     const height = this.node.getComponent(UITransform)!.height;
     const sx = (x: number) => (x - cameraX) * size;
@@ -137,10 +144,6 @@ export class WorldView extends Component {
     for (const effect of expedition.effects.splice(0)) {
       if (effect.z === p.z) this.spawn(effect.x, effect.y, effect.z, effect.type, effect.kind === "dig" ? 2 : 16);
     }
-    const behindAlpha = (x: number, y: number) => {
-      const dy = y - p.y, dx = Math.abs(x - p.x);
-      return dy > 0.15 && dy < 1.75 && dx < 1.35 ? Math.min(1, 0.32 + (dy - 0.15) * 0.55) : 1;
-    };
     const detail = this.details;
     const overlay = this.overlay;
     detail.clear(); overlay.clear();
@@ -148,7 +151,8 @@ export class WorldView extends Component {
     const entities: Entity[] = [];
     const radiusX = Math.ceil(width / size / 2) + 1;
     // Include the camera offset and tall sprites rooted just below the viewport.
-    const radiusY = Math.ceil(height / row * Math.max(tuning.cameraAnchor, 1 - tuning.cameraAnchor)) + 5;
+    const radiusY = Math.ceil((height * Math.max(tuning.cameraAnchor, 1 - tuning.cameraAnchor)
+      + size * 4 * projection.uprightScale) / row) + 1;
     const tint = p.z === 0 ? "ffffff" : STRATUM_TINT[stratumAt(p.z).id];
     for (let y = Math.floor(cameraY) - radiusY; y <= Math.floor(cameraY) + radiusY; y++) {
       for (let x = Math.floor(cameraX) - radiusX; x <= Math.floor(cameraX) + radiusX; x++) {
@@ -189,10 +193,10 @@ export class WorldView extends Component {
           detail.fillColor = new Color(22, 33, 20, 48);
           detail.ellipse(sx(x + 0.65), sy(y + 0.8), size * 0.6, row * 0.2); detail.fill();
           entities.push({ art: variants[variant % variants.length],
-            x: x + 0.5, y: y + 0.85, width: size * (1.65 + (variant % 5) * 0.06), alpha: behindAlpha(x + 0.5, y + 0.5) });
+            x: x + 0.5, y: y + 0.85, width: size * (1.65 + (variant % 5) * 0.06) });
         } else if (ORE_ART[tile.type]) {
           entities.push({ art: ORE_ART[tile.type], x: x + 0.5, y: y + 0.85, width: size * 1.12,
-            alpha: behindAlpha(x + 0.5, y + 0.5), label: tile.type === "stubborn" ? "!" : "" });
+            label: tile.type === "stubborn" ? "!" : "" });
         } else if (tile.type === "chest") {
           const xx = sx(x + 0.15), yy = sy(y + 0.77);
           detail.fillColor = this.color("85582f"); detail.rect(xx, yy, size * 0.7, row * 0.5); detail.fill();
@@ -206,9 +210,7 @@ export class WorldView extends Component {
       for (const house of VILLAGE.houses) {
         const x = house.x + house.width / 2, y = house.y + house.depth;
         if (Math.abs(sx(x)) > width / 2 + size * 3 || Math.abs(sy(y)) > height / 2 + size * 4) continue;
-        const behind = p.y < y + 0.1 && p.y > house.y - 1 && p.x > house.x - 0.4 && p.x < house.x + house.width + 0.4;
-        const fade = Math.min(y + 0.1 - p.y, p.x - house.x + 0.4, house.x + house.width + 0.4 - p.x);
-        entities.push({ art: house.sprite, x, y: y + 0.2, width: size * 2.4, alpha: behind ? Math.max(0.35, 1 - fade * 0.8) : 1 });
+        entities.push({ art: house.sprite, x, y: y + 0.2, width: size * 2.4 });
       }
       const npc = VILLAGE.npc;
       if (Math.abs(sx(npc.x + 0.5)) < width / 2 + size && Math.abs(sy(npc.y + 0.5)) < height / 2 + size * 2) {
@@ -224,8 +226,13 @@ export class WorldView extends Component {
     entities.sort((a, b) => a.y - b.y);
     detail.fillColor = new Color(22, 18, 12, 65);
     detail.ellipse(sx(p.x), sy(p.y + 0.18), size * 0.25, row * 0.1); detail.fill();
-    entities.forEach((entity, i) => this.put(this.actors, i, this.actorLayer, entity.art, sx(entity.x), sy(entity.y),
-      entity.width, undefined, "ffffff", entity.alpha ?? 1, entity.flip, entity.angle, entity.label));
+    entities.forEach((entity, i) => {
+      const h = artHeight(entity.art, entity.width);
+      const alpha = entity.art === playerArt ? 1 : occlusionAlpha((entity.x - p.x) * size,
+        (entity.y - p.y - 0.18) * row, entity.width, h, size * 0.62, artHeight(playerArt, size * 0.62));
+      this.put(this.actors, i, this.actorLayer, entity.art, sx(entity.x), sy(entity.y),
+        entity.width, h, "ffffff", alpha, entity.flip, entity.angle, entity.label);
+    });
     for (let i = entities.length; i < this.actors.length; i++) this.actors[i].sprite.node.active = false;
 
     for (const drop of expedition.wordDrops) {

@@ -13,6 +13,7 @@ import { MAX_FRAME_SECONDS } from "../data/constants/GameRules";
 import { PlayerStore } from "../data/player-data/PlayerStore";
 import { Expedition } from "../core/Expedition";
 import { WorldView } from "./WorldView";
+import { obliqueProjection } from "./ObliqueProjection";
 
 const { ccclass, requireComponent } = _decorator;
 const WIDTH = 720, HEIGHT = 1280;
@@ -65,9 +66,10 @@ export class GameRoot extends Component {
   private async loadGame(): Promise<void> {
     try {
       const t = this.tuning;
-      if (![t.moveSpeed, t.acceleration, t.digSeconds, t.cameraFollow, t.tileSize, t.rowHeight].every(v => Number.isFinite(v) && v > 0)) {
+      if (![t.moveSpeed, t.acceleration, t.digSeconds, t.cameraFollow, t.tileSize].every(v => Number.isFinite(v) && v > 0)) {
         throw new Error("GameTuning 参数必须是正数");
       }
+      obliqueProjection(t.tileSize, t.cameraPitch);
       if (!Number.isFinite(t.cameraAnchor) || t.cameraAnchor < 0.4 || t.cameraAnchor > 0.65) {
         throw new Error("角色脚底位置必须在 0.4–0.65 之间");
       }

@@ -84,8 +84,8 @@
     "digSeconds": 0.42,
     "cameraFollow": 8,
     "tileSize": 48,
-    "rowHeight": 32,
-    "cameraAnchor": 0.56,
+    "cameraPitch": 25,
+    "cameraAnchor": 0.52,
     "worldContent": {
       "__uuid__": "9eb6d2db-1e6e-46e3-9fe5-2f5bad0bffd2",
       "__expectedType__": "cc.JsonAsset"

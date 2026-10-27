@@ -18,6 +18,7 @@ import { SALT, WORD_DROP_CHANCE, WORD_PICKUP_COINS } from "../cocos/assets/data/
 import { hashCoords } from "../cocos/assets/core/rng.ts";
 import { ART_NAMES, ORE_ART } from "../cocos/assets/data/resource-config/ArtCatalog.ts";
 import { readFileSync } from "node:fs";
+import { obliqueProjection, occlusionAlpha } from "../cocos/assets/scripts/ObliqueProjection.ts";
 
 let passed = 0;
 function check(name: string, fn: () => void) {
@@ -330,6 +331,26 @@ check("all approved sprite names resolve to real PNG assets", () => {
     assert.ok(bytes.readUInt32BE(16) > 0 && bytes.readUInt32BE(20) > 0);
   }
   for (const name of Object.values(ORE_ART)) assert.ok((ART_NAMES as readonly string[]).includes(name));
+});
+
+check("lower front camera exposes upright bodies while compressing ground depth", () => {
+  const level = obliqueProjection(48, 45), low = obliqueProjection(48, 25);
+  assert.ok(Math.abs(level.uprightScale - 1) < 1e-12);
+  assert.ok(low.rowHeight < level.rowHeight);
+  assert.ok(low.uprightScale > level.uprightScale);
+  const half = obliqueProjection(24, 25);
+  assert.equal(half.rowHeight * 2, low.rowHeight);
+  assert.equal(half.uprightScale, low.uprightScale);
+  for (const pitch of [NaN, Infinity, 0, 90]) assert.throws(() => obliqueProjection(48, pitch));
+  assert.throws(() => obliqueProjection(0, 25));
+});
+
+check("foreground occlusion accounts for tall trees at low camera angles", () => {
+  assert.equal(occlusionAlpha(0, -1, 90, 150, 30, 50), 1, "background stays opaque");
+  assert.equal(occlusionAlpha(120, 60, 90, 150, 30, 50), 1, "off to the side stays opaque");
+  assert.equal(occlusionAlpha(0, 160, 90, 150, 30, 50), 1, "tree top below player stays opaque");
+  assert.ok(occlusionAlpha(0, 60, 90, 150, 30, 50) < 0.4, "tree three rows ahead still fades");
+  assert.ok(occlusionAlpha(0, 130, 90, 150, 30, 50) > occlusionAlpha(0, 60, 90, 150, 30, 50));
 });
 
 console.log("\n" + passed + " test groups passed");

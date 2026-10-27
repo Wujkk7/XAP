@@ -16,10 +16,12 @@ import {
 import type { GameSave } from "../../cocos/assets/data/player-data/save.ts";
 import { VILLAGE, villageBlocked } from "../../cocos/assets/data/external-files/Village.ts";
 import { WORD_DROP_CHANCE, WORD_PICKUP_RADIUS, WORD_PICKUP_COINS, MAX_WORD_DROPS } from "../../cocos/assets/data/constants/GameRules.ts";
+import { obliqueProjection, occlusionAlpha } from "../../cocos/assets/scripts/ObliqueProjection.ts";
 
 // ---------- constants ----------
 const TILE = 24; // 360px Web viewport matches Cocos 48px at 720px design width.
-const ROW_H = 16; // Ground compression only; upright sprites retain their proportions.
+const PROJECTION = obliqueProjection(TILE, 25);
+const ROW_H = PROJECTION.rowHeight;
 const FACE = 7; // px fake height of a block's front face
 const SAVE_KEY = "xap-save-v1";
 const SEED_STRING = "xap-world-1";
@@ -415,7 +417,7 @@ function collectDrops() {
 function drawDrops(now: number) {
   for (const d of drops) {
     if (d.z !== player.z) continue;
-    const s = { sx: W / 2 + (d.x + 0.5 - cam.x) * TILE, sy: H * 0.56 + (d.y + 0.5 - cam.y) * ROW_H };
+    const s = { sx: W / 2 + (d.x + 0.5 - cam.x) * TILE, sy: H * 0.52 + (d.y + 0.5 - cam.y) * ROW_H };
     const bobY = Math.sin(now / 280 + d.x * 1.7 + d.y) * 2.5;
     ctx.save();
     ctx.translate(s.sx, s.sy - 6 + bobY);
@@ -505,7 +507,7 @@ function updateParticles(dt: number) {
 function drawParticles() {
   for (const pt of particles) {
     const sx = W / 2 + (pt.x - cam.x) * TILE;
-    const sy = H * 0.56 + (pt.y - cam.y) * ROW_H;
+    const sy = H * 0.52 + (pt.y - cam.y) * ROW_H;
     ctx.globalAlpha = Math.max(0, 1 - pt.life / pt.maxLife);
     ctx.fillStyle = pt.color;
     ctx.fillRect(sx - pt.size / 2, sy - pt.size / 2, pt.size, pt.size);
@@ -635,16 +637,15 @@ function imgReady(name: string): boolean {
 /** Alpha for an entity sprite when the player passes behind it (north of
  *  it): continuous with float distance so crossing rows never pops, and the
  *  player is never fully swallowed by pixels (the “被图层挡住” complaint). */
-function behindAlpha(wx: number, wy: number): number {
-  const dy = (wy + 0.5) - player.y;
-  const dx = Math.abs((wx + 0.5) - player.x);
-  if (dy > 0.15 && dy < 1.75 && dx < 1.35) return Math.min(1, 0.32 + (dy - 0.15) * 0.55);
-  return 1;
+function behindAlpha(wx: number, wy: number, name: string, width: number): number {
+  const im = IMG[name];
+  return occlusionAlpha((wx + 0.5 - player.x) * TILE, (wy + 0.5 - player.y) * ROW_H,
+    width, width * im.naturalHeight / im.naturalWidth * PROJECTION.uprightScale, TILE * 0.62, TILE * PROJECTION.uprightScale);
 }
 
 function drawSprite(name: string, cx: number, bottom: number, w: number, flip = false) {
   const im = IMG[name];
-  const h = (w * im.naturalHeight) / im.naturalWidth;
+  const h = (w * im.naturalHeight) / im.naturalWidth * PROJECTION.uprightScale;
   ctx.save();
   if (flip) {
     ctx.translate(cx, 0);
@@ -774,7 +775,7 @@ function drawTile(sx: number, sy: number, wx: number, wy: number) {
       const v = hashCoords(seed, wx, wy, 0, 22) % 3;
       const name = v === 0 ? "tree_oak" : v === 1 ? "tree_pine" : "tree_apple";
       if (imgReady(name)) {
-        ctx.globalAlpha = behindAlpha(wx, wy);
+        ctx.globalAlpha = behindAlpha(wx, wy, name, TILE * 1.8);
         drawSprite(name, sx + TILE / 2, sy + ROW_H + 8, TILE * 1.8);
         ctx.globalAlpha = 1;
       }
@@ -788,7 +789,7 @@ function drawTile(sx: number, sy: number, wx: number, wy: number) {
       }
     } else if (t.type === "surface_rock") {
       if (imgReady("node_rock")) {
-        ctx.globalAlpha = behindAlpha(wx, wy);
+        ctx.globalAlpha = behindAlpha(wx, wy, "node_rock", TILE * 1.12);
         drawSprite("node_rock", sx + TILE / 2, sy + ROW_H + 5, TILE * 1.12);
         ctx.globalAlpha = 1;
       }
@@ -848,7 +849,7 @@ function drawTile(sx: number, sy: number, wx: number, wy: number) {
     ctx.fillRect(sx + TILE / 2 - 2, sy + 18, 4, 5);
   } else if (t.type === "stubborn") {
     if (imgReady("node_ruby")) {
-      ctx.globalAlpha = behindAlpha(wx, wy);
+      ctx.globalAlpha = behindAlpha(wx, wy, "node_ruby", TILE * 1.08);
       drawSprite("node_ruby", sx + TILE / 2, sy + ROW_H + 4, TILE * 1.08);
       ctx.globalAlpha = 1;
     }
@@ -859,7 +860,7 @@ function drawTile(sx: number, sy: number, wx: number, wy: number) {
   } else if (ORE_NODE[t.type]) {
     const name = ORE_NODE[t.type];
     if (imgReady(name)) {
-      ctx.globalAlpha = behindAlpha(wx, wy);
+      ctx.globalAlpha = behindAlpha(wx, wy, name, TILE * 1.12);
       drawSprite(name, sx + TILE / 2, sy + ROW_H + 5, TILE * 1.12);
       ctx.globalAlpha = 1;
     }
@@ -957,12 +958,12 @@ function render(now: number) {
   ctx.fillRect(0, 0, W, H);
   const camX = cam.x, camY = cam.y;
   const halfCols = Math.ceil(W / TILE / 2) + 2;
-  const halfRows = Math.ceil(H / ROW_H * 0.56) + 5;
+  const halfRows = Math.ceil((H * 0.52 + TILE * 4 * PROJECTION.uprightScale) / ROW_H) + 1;
   const x0 = Math.floor(camX) - halfCols, x1 = Math.floor(camX) + halfCols;
   const y0 = Math.floor(camY) - halfRows, y1 = Math.floor(camY) + halfRows;
   const toScreen = (wx: number, wy: number) => ({
     sx: Math.round((wx - camX) * TILE + W / 2 - TILE / 2),
-    sy: Math.round((wy - camY) * ROW_H + H * 0.56 - ROW_H / 2),
+    sy: Math.round((wy - camY) * ROW_H + H * 0.52 - ROW_H / 2),
   });
   for (let wy = y0; wy <= y1; wy++) {
     for (let wx = x0; wx <= x1; wx++) {
@@ -977,8 +978,8 @@ function render(now: number) {
         if (wy !== lastRow) continue;
         const h = toScreen(house.x, lastRow);
         const front = lastRow + 0.6;
-        ctx.globalAlpha = player.y >= front || player.x < house.x - 0.4 || player.x > house.x + house.width + 0.4
-          ? 1 : Math.min(1, 0.35 + (front - player.y) * 0.5);
+        ctx.globalAlpha = imgReady(house.sprite)
+          ? behindAlpha(house.x + house.width / 2 - 0.5, front - 0.5, house.sprite, TILE * 2.4) : 1;
         drawHouseSprite(h.sx, h.sy, house.sprite);
         ctx.globalAlpha = 1;
       }
