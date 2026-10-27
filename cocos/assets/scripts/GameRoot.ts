@@ -68,6 +68,9 @@ export class GameRoot extends Component {
       if (![t.moveSpeed, t.acceleration, t.digSeconds, t.cameraFollow, t.tileSize, t.rowHeight].every(v => Number.isFinite(v) && v > 0)) {
         throw new Error("GameTuning 参数必须是正数");
       }
+      if (!Number.isFinite(t.cameraAnchor) || t.cameraAnchor < 0.4 || t.cameraAnchor > 0.65) {
+        throw new Error("角色脚底位置必须在 0.4–0.65 之间");
+      }
       const content = readWorldContent(t.worldContent?.json);
       this.title = content.title;
       await this.world.loadArt();
@@ -104,7 +107,7 @@ export class GameRoot extends Component {
   private button(parent: Node, title: string, x: number, y: number, w: number, h: number, action: () => void, hold?: (down: boolean) => void): Label {
     const node = this.nodeAt(title, parent, x, y, w, h);
     const graphics = node.addComponent(Graphics);
-    graphics.fillColor = new Color().fromHEX(UI_COLORS.panel);
+    graphics.fillColor = new Color().fromHEX(UI_COLORS.panel + "e1");
     graphics.roundRect(-w / 2, -h / 2, w, h, 14); graphics.fill();
     graphics.strokeColor = new Color().fromHEX(UI_COLORS.accent);
     graphics.lineWidth = 2; graphics.stroke();
@@ -138,9 +141,12 @@ export class GameRoot extends Component {
     camera.clearFlags = Camera.ClearFlag.SOLID_COLOR;
     camera.clearColor = new Color().fromHEX(UI_COLORS.background);
     canvas.cameraComponent = camera;
-    this.world = this.nodeAt("世界", this.root, 0, 40, WIDTH, 820).addComponent(WorldView);
-    this.hud = this.text(this.root, "进度", "加载中…", 0, 574, 680, 92, 28);
-    this.status = this.text(this.root, "提示", "", 0, 493, 670, 62, 22);
+    this.world = this.nodeAt("世界", this.root, 0, 0, WIDTH, HEIGHT).addComponent(WorldView);
+    const hudBacking = this.nodeAt("状态底色", this.root, 0, 560, 680, 124).addComponent(Graphics);
+    hudBacking.fillColor = new Color(24, 29, 21, 220);
+    hudBacking.roundRect(-340, -62, 680, 124, 10); hudBacking.fill();
+    this.hud = this.text(this.root, "进度", "加载中…", 0, 580, 652, 65, 24);
+    this.status = this.text(this.root, "提示", "", 0, 526, 652, 34, 20);
     const joystick = this.nodeAt("摇杆", this.root, -230, -485, 180, 180);
     this.joystick = joystick.addComponent(Graphics);
     joystick.on(Node.EventType.TOUCH_START, this.moveJoystick, this);
@@ -286,7 +292,7 @@ export class GameRoot extends Component {
     this.saveTimer += dt;
     if (this.saveTimer >= 2) { this.saveTimer = 0; this.persist(); }
     this.joystick.clear();
-    this.joystick.fillColor = new Color().fromHEX(UI_COLORS.panel);
+    this.joystick.fillColor = new Color().fromHEX(UI_COLORS.panel + "b4");
     this.joystick.circle(0, 0, 80); this.joystick.fill();
     this.joystick.fillColor = new Color().fromHEX(UI_COLORS.accent);
     this.joystick.circle(this.stick.x * 52, -this.stick.y * 52, 29); this.joystick.fill();

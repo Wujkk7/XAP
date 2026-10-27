@@ -93,6 +93,12 @@ npm run demo    # ASCII 地图 + 示例题目，肉眼检查生成
 
 ## 协作约定
 
+### 第一次视角更新（2026-10-27）
+
+- DESIGN v0.5：沿用原创素材，开阔斜俯视；暂保留竖屏入口。GameTuning 与 Main.scene 同步为 48×32，cameraAnchor=0.56；世界铺满画布，HUD/操作浮层。
+- WorldView 按新镜头偏移与高树留白扩大可见范围；树型/尺寸变化与树影仅影响显示。保存/坐标/碰撞规则不变，原 PNG 未修改。旧 Web 同步镜头比例并重建。
+- 已通过 24 组核心检查、严格 TS、Creator Web Mobile 构建与浏览器操作/对话/开箱/图鉴/续档；实测地下 21 次 draw call，无运行异常。手机实机性能尚未验证。
+
 - GitHub main 已包含 Cocos 当前版本；远程试玩见 PREVIEW.md。后续发布复用其中的 Sites 站点 ID 与 `.local-sites/xap-preview/` 工作目录，不重复创建站点；保持现有访问范围。
 
 - 每个 PR/提交要回答：做了什么、怎么验证的（贴测试结果）、还有什么没做。

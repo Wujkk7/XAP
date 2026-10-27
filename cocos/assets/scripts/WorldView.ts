@@ -127,7 +127,7 @@ export class WorldView extends Component {
     const width = this.node.getComponent(UITransform)!.width;
     const height = this.node.getComponent(UITransform)!.height;
     const sx = (x: number) => (x - cameraX) * size;
-    const sy = (y: number) => -(y - cameraY) * row;
+    const sy = (y: number) => -(y - cameraY) * row + height * (0.5 - tuning.cameraAnchor);
     const moved = this.oldDepth === p.z ? Math.hypot(p.x - this.oldX, p.y - this.oldY) : 0;
     this.oldX = p.x; this.oldY = p.y;
     if (this.oldDepth !== p.z) this.particles.length = 0;
@@ -147,7 +147,8 @@ export class WorldView extends Component {
     let groundCount = 0;
     const entities: Entity[] = [];
     const radiusX = Math.ceil(width / size / 2) + 1;
-    const radiusY = Math.ceil(height / row / 2) + 3;
+    // Include the camera offset and tall sprites rooted just below the viewport.
+    const radiusY = Math.ceil(height / row * Math.max(tuning.cameraAnchor, 1 - tuning.cameraAnchor)) + 5;
     const tint = p.z === 0 ? "ffffff" : STRATUM_TINT[stratumAt(p.z).id];
     for (let y = Math.floor(cameraY) - radiusY; y <= Math.floor(cameraY) + radiusY; y++) {
       for (let x = Math.floor(cameraX) - radiusX; x <= Math.floor(cameraX) + radiusX; x++) {
@@ -183,9 +184,12 @@ export class WorldView extends Component {
           detail.stroke();
         }
         if (tile.type === "tree") {
-          const variants = ["tree_oak", "tree_pine", "tree_apple"];
-          entities.push({ art: variants[hashCoords(expedition.slot.game.seed, x, y, 0, 22) % 3],
-            x: x + 0.5, y: y + 0.85, width: size * 1.8, alpha: behindAlpha(x + 0.5, y + 0.5) });
+          const variants = ["tree_oak", "tree_pine", "tree_apple", "tree_birch"];
+          const variant = hashCoords(expedition.slot.game.seed, x, y, 0, 22);
+          detail.fillColor = new Color(22, 33, 20, 48);
+          detail.ellipse(sx(x + 0.65), sy(y + 0.8), size * 0.6, row * 0.2); detail.fill();
+          entities.push({ art: variants[variant % variants.length],
+            x: x + 0.5, y: y + 0.85, width: size * (1.65 + (variant % 5) * 0.06), alpha: behindAlpha(x + 0.5, y + 0.5) });
         } else if (ORE_ART[tile.type]) {
           entities.push({ art: ORE_ART[tile.type], x: x + 0.5, y: y + 0.85, width: size * 1.12,
             alpha: behindAlpha(x + 0.5, y + 0.5), label: tile.type === "stubborn" ? "!" : "" });

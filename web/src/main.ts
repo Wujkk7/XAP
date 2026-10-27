@@ -18,9 +18,9 @@ import { VILLAGE, villageBlocked } from "../../cocos/assets/data/external-files/
 import { WORD_DROP_CHANCE, WORD_PICKUP_RADIUS, WORD_PICKUP_COINS, MAX_WORD_DROPS } from "../../cocos/assets/data/constants/GameRules.ts";
 
 // ---------- constants ----------
-const TILE = 36; // px, top-face size (smaller tiles: see more of the world)
-const ROW_H = 31; // px per row (squashed for the oblique view)
-const FACE = 11; // px fake height of a block's front face
+const TILE = 24; // 360px Web viewport matches Cocos 48px at 720px design width.
+const ROW_H = 16; // Ground compression only; upright sprites retain their proportions.
+const FACE = 7; // px fake height of a block's front face
 const SAVE_KEY = "xap-save-v1";
 const SEED_STRING = "xap-world-1";
 
@@ -415,7 +415,7 @@ function collectDrops() {
 function drawDrops(now: number) {
   for (const d of drops) {
     if (d.z !== player.z) continue;
-    const s = { sx: W / 2 + (d.x + 0.5 - cam.x) * TILE, sy: H * 0.42 + (d.y + 0.5 - cam.y) * ROW_H };
+    const s = { sx: W / 2 + (d.x + 0.5 - cam.x) * TILE, sy: H * 0.56 + (d.y + 0.5 - cam.y) * ROW_H };
     const bobY = Math.sin(now / 280 + d.x * 1.7 + d.y) * 2.5;
     ctx.save();
     ctx.translate(s.sx, s.sy - 6 + bobY);
@@ -505,7 +505,7 @@ function updateParticles(dt: number) {
 function drawParticles() {
   for (const pt of particles) {
     const sx = W / 2 + (pt.x - cam.x) * TILE;
-    const sy = H * 0.42 + (pt.y - cam.y) * ROW_H;
+    const sy = H * 0.56 + (pt.y - cam.y) * ROW_H;
     ctx.globalAlpha = Math.max(0, 1 - pt.life / pt.maxLife);
     ctx.fillStyle = pt.color;
     ctx.fillRect(sx - pt.size / 2, sy - pt.size / 2, pt.size, pt.size);
@@ -957,12 +957,12 @@ function render(now: number) {
   ctx.fillRect(0, 0, W, H);
   const camX = cam.x, camY = cam.y;
   const halfCols = Math.ceil(W / TILE / 2) + 2;
-  const halfRows = Math.ceil(H / ROW_H / 2) + 2;
+  const halfRows = Math.ceil(H / ROW_H * 0.56) + 5;
   const x0 = Math.floor(camX) - halfCols, x1 = Math.floor(camX) + halfCols;
   const y0 = Math.floor(camY) - halfRows, y1 = Math.floor(camY) + halfRows;
   const toScreen = (wx: number, wy: number) => ({
     sx: Math.round((wx - camX) * TILE + W / 2 - TILE / 2),
-    sy: Math.round((wy - camY) * ROW_H + H * 0.42 - ROW_H / 2),
+    sy: Math.round((wy - camY) * ROW_H + H * 0.56 - ROW_H / 2),
   });
   for (let wy = y0; wy <= y1; wy++) {
     for (let wx = x0; wx <= x1; wx++) {
