@@ -263,7 +263,13 @@ seenWords 存进存档、开题与捡词卡都记收集）、挖矿词卡掉落�
 （每下潜 10m 的 toast 带一个词）；③ 提示文字改左上角小字短句
 （11px、两行内）。注：三轮的托管构建中途被取消（内容已全量在仓库），
 四轮将连同三轮一起重建托管页。
-未做：真机手感验证、Cocos 工程与各端打包、tier2+ 词库、合成/种田等阶段二内容。
+当时未做：真机手感验证、Cocos 工程与各端打包、tier2+ 词库、合成/种田等阶段二内容。
+2026-10-27 接入补充：已建立 Creator 3.8.8 工程与五类数据目录，基础探险流程接通；
+Web Mobile 构建及浏览器输入/续档检查通过，原创美术、村庄与反馈特效尚待迁移，各原生端与小游戏端待验证。
+同日后续恢复：从远程已提交的 Web 构建无损提取 31 张 v2 原创 PNG，Cocos 使用原生精灵资源；
+已接回村庄/梅婆婆双语对话、遮挡渐隐、挖掘碎屑、跑动摆动与扬尘、词卡拾取、深度提示、完整图鉴和自动踏入坑洞下潜。
+村庄布局/台词、掉落常量与资源映射归五类数据目录，Web 共用。GameSave v1 不变，
+未拾取词卡仍为会话临时状态；角色素材每方向仅一帧，不增画未经定稿的新素材。
 移动里程碑（2026-10-27 按 gami「像星露谷一样正常跑动」要求迭代）：速度改为指数趋近的加减速（起步/停步不再瞬时）、镜头平滑跟随（指数趋近＋切层瞬时对齐）、贴墙拐角助滑（单轴被挡时沿墙向开口滑 0.085 格内）、跑动动画改由步频驱动（步幅 0.38 格同步起伏与扬尘）；下井落点居中井口列，贴宝箱/顽固石落点立即脱困（resolveEmbed）。验证：tools/smoke_drive.mjs 无头驾驶测试——模拟按键实跑（东/南各 5.7 格、斜跑、挖树、竖井上下）＋1,500 帧随机 fuzz，断言每帧不嵌墙、无报错条、相机停稳误差 <0.08 格，全过。
 
 
@@ -276,16 +282,26 @@ tree 树 / sun 太阳 / moon 月亮 / star 星星 / cat 猫 / dog 狗 /
 bird 鸟 / fish 鱼 / book 书 / key 钥匙 / map 地图 / cave 洞穴 /
 gem 宝石 / box 盒子
 
-## 仓库结构（建议）
+## 仓库结构（2026-10-27 Cocos 接入）
 
 ```
-assets/            Cocos 场景、脚本、资源（引擎层）
-core/              纯 TS 核心逻辑（worldgen / vocab / save / srs），可独立测试
-data/              词库数据（按 tier 分文件，JSON）
-docs/              设计与交接文档（本文件即 docs 的源稿，根目录保留一份）
+cocos/             Creator 3.8.8 工程
+cocos/assets/core/ 纯 TS 核心逻辑，Web 与 Node 测试共用
+cocos/assets/data/constants/         固定规则与地层表
+cocos/assets/data/exposed-variables/ 检查器可调参数
+cocos/assets/data/resource-config/   资源表现配置
+cocos/assets/data/external-files/    开局 JSON 与独立词库内容
+cocos/assets/data/player-data/       存档格式、校验与设备存储适配
+cocos/assets/scenes/                 场景
+cocos/assets/scripts/                Cocos 渲染、输入与界面
+web/               原 Canvas 可玩原型
 test/              核心逻辑的自动化测试
 AGENTS.md          给 Codex / 其他 AI 协作者的交接说明（约束、禁区、当前进度）
 ```
+
+五类数据是职责分类，不相互覆盖。玩家数据不反向修改固定规则；编辑器调参不进入存档。
+玩家实际存档写入设备存储，资源目录只放格式与读写代码。GameSave 字段保持 v1，
+Cocos 在独立版本的容器中记录角色位置。格式错误时保留原存档并显示问题。
 
 ## 协作方式（gami × 无井 × Codex）
 

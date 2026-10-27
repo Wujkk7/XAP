@@ -2,11 +2,11 @@
 // question, so the generation can be eyeballed without the game engine.
 // Run: npm run demo
 
-import { hashString } from "../core/rng.ts";
-import { getTile } from "../core/worldgen.ts";
-import { stratumAt } from "../core/strata.ts";
-import { WORDS_TIER1 } from "../core/vocab.ts";
-import { makeQuestion } from "../core/quiz.ts";
+import { hashString } from "../cocos/assets/core/rng.ts";
+import { getTile } from "../cocos/assets/core/worldgen.ts";
+import { stratumAt } from "../cocos/assets/core/strata.ts";
+import { WORDS_TIER1 } from "../cocos/assets/core/vocab.ts";
+import { makeQuestion } from "../cocos/assets/core/quiz.ts";
 
 const seed = hashString("xap-test-world");
 const z = 12;

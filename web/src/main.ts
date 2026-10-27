@@ -2,18 +2,20 @@
 // Rendering/input layer only: every rule (world generation, vocabulary,
 // quiz, mastery, save) comes from ../../core. Nothing here re-implements core.
 
-import { getTile } from "../../core/worldgen.ts";
-import type { Tile } from "../../core/worldgen.ts";
-import { stratumAt } from "../../core/strata.ts";
-import { WORDS_TIER1 } from "../../core/vocab.ts";
-import type { WordEntry } from "../../core/vocab.ts";
-import { ChestSession } from "../../core/quiz.ts";
-import { MasteryBook, pickChestWord } from "../../core/mastery.ts";
+import { getTile } from "../../cocos/assets/core/worldgen.ts";
+import type { Tile } from "../../cocos/assets/core/worldgen.ts";
+import { stratumAt } from "../../cocos/assets/core/strata.ts";
+import { WORDS_TIER1 } from "../../cocos/assets/core/vocab.ts";
+import type { WordEntry } from "../../cocos/assets/core/vocab.ts";
+import { ChestSession } from "../../cocos/assets/core/quiz.ts";
+import { MasteryBook, pickChestWord } from "../../cocos/assets/core/mastery.ts";
 import {
   newSave, getDiff, setDiff, placeStubborn, addItem,
   serializeSave, deserializeSave, key as saveKey,
-} from "../../core/save.ts";
-import type { GameSave } from "../../core/save.ts";
+} from "../../cocos/assets/data/player-data/save.ts";
+import type { GameSave } from "../../cocos/assets/data/player-data/save.ts";
+import { VILLAGE, villageBlocked } from "../../cocos/assets/data/external-files/Village.ts";
+import { WORD_DROP_CHANCE, WORD_PICKUP_RADIUS, WORD_PICKUP_COINS, MAX_WORD_DROPS } from "../../cocos/assets/data/constants/GameRules.ts";
 
 // ---------- constants ----------
 const TILE = 36; // px, top-face size (smaller tiles: see more of the world)
@@ -72,13 +74,7 @@ function tileAt(wx: number, wy: number, z: number): RTile {
 }
 
 // Village sample (hand-made, surface only): two houses + one NPC.
-const HOUSE_TILES = new Set(["3,-4", "4,-4", "3,-3", "4,-3", "6,-4", "7,-4", "6,-3", "7,-3"]);
-const NPC_POS = { x: 5, y: -2 };
-function villageBlocked(wx: number, wy: number, z: number): boolean {
-  if (z !== 0) return false;
-  if (HOUSE_TILES.has(wx + "," + wy)) return true;
-  return wx === NPC_POS.x && wy === NPC_POS.y;
-}
+const NPC_POS = VILLAGE.npc;
 function isSolid(wx: number, wy: number, z: number): boolean {
   return villageBlocked(wx, wy, z) || tileAt(wx, wy, z).solid;
 }
@@ -289,16 +285,10 @@ function descendOrAct() {
 function actButton() { descendOrAct(); }
 
 // ---------- NPC (village sample) ----------
-const NPC_LINES = [
-  { name: "梅婆婆 May", en: "Hello! I am May. Dig deep, find gold!", zh: "你好！我是梅婆婆。往深挖，能找到金子！" },
-  { name: "梅婆婆 May", en: "A chest needs a word. The word is the key.", zh: "宝箱需要一个单词。单词就是钥匙。" },
-  { name: "梅婆婆 May", en: "Wrong word? No fear. It sleeps under the stone.", zh: "答错词？别怕。它睡在石头下面等你。" },
-  { name: "梅婆婆 May", en: "Trees give wood. Wood makes good tools.", zh: "树给木头。木头能做好工具。" },
-];
 let npcIdx = 0;
 function talkToNpc() {
-  const line = NPC_LINES[npcIdx++ % NPC_LINES.length];
-  $("npcName").textContent = line.name;
+  const line = VILLAGE.dialogue[npcIdx++ % VILLAGE.dialogue.length];
+  $("npcName").textContent = VILLAGE.npc.name;
   $("npcText").innerHTML = '<span class="en"></span><br><span class="zh"></span>';
   ($("npcText").querySelector(".en") as HTMLElement).textContent = line.en;
   ($("npcText").querySelector(".zh") as HTMLElement).textContent = line.zh;
@@ -405,18 +395,18 @@ function pickDropWord(): WordEntry {
 }
 function maybeSpawnDrop(x: number, y: number, type: string) {
   if (type === "chest" || type === "stubborn") return;
-  if (Math.random() > 0.16) return;
+  if (Math.random() > WORD_DROP_CHANCE) return;
   drops.push({ x, y, z: player.z, entry: pickDropWord() });
-  if (drops.length > 12) drops.shift();
+  if (drops.length > MAX_WORD_DROPS) drops.shift();
 }
 function collectDrops() {
   for (let i = drops.length - 1; i >= 0; i--) {
     const d = drops[i];
     if (d.z !== player.z) continue;
-    if (Math.hypot(player.x - (d.x + 0.5), player.y - (d.y + 0.5)) < 0.55) {
+    if (Math.hypot(player.x - (d.x + 0.5), player.y - (d.y + 0.5)) < WORD_PICKUP_RADIUS) {
       drops.splice(i, 1);
       markSeen(d.entry.word);
-      coins += 2;
+      coins += WORD_PICKUP_COINS;
       toast("词卡 +" + d.entry.word + " · " + d.entry.meaning + "（图鉴 " + save.seenWords.length + "/" + WORDS_TIER1.length + "）");
       persist();
     }
@@ -626,7 +616,7 @@ function update(dt: number) {
 
 // ---------- rendering (art direction: the reference boards in assets/reference) ----------
 import { SPRITES } from "./sprites.ts";
-import { hashCoords } from "../../core/rng.ts";
+import { hashCoords } from "../../cocos/assets/core/rng.ts";
 
 const IMG: Record<string, HTMLImageElement> = {};
 function loadSprites() {
@@ -687,10 +677,11 @@ const STRATUM_TINT: Record<number, string> = {
 
 // Village dressing (surface only): dirt paths + a small farm plot west of spawn.
 function isPathTile(wx: number, wy: number): boolean {
-  return (wy === -1 && wx >= -4 && wx <= 10) || (wx === 5 && wy >= -1 && wy <= 4);
+  return VILLAGE.paths.some(path => wx >= path.minX && wx <= path.maxX && wy >= path.minY && wy <= path.maxY);
 }
 function isFarmTile(wx: number, wy: number): boolean {
-  return wx >= -7 && wx <= -5 && wy >= -4 && wy <= -2;
+  const farm = VILLAGE.farm;
+  return wx >= farm.minX && wx <= farm.maxX && wy >= farm.minY && wy <= farm.maxY;
 }
 
 function drawGroundSprite(name: string, sx: number, sy: number) {
@@ -978,21 +969,19 @@ function render(now: number) {
       const { sx, sy } = toScreen(wx, wy);
       drawTile(sx, sy, wx, wy);
     }
-    if (player.z === 0 && wy === -3) {
+    if (player.z === 0) {
       // Fade a house while the player walks behind it so he never vanishes
       // into pixels he cannot collide with.
-      const houseAlpha = (hx: number) => {
-        if (player.y >= -2.4 || player.x < hx - 0.4 || player.x > hx + 2.4) return 1;
-        return Math.min(1, 0.35 + (-2.4 - player.y) * 0.5);
-      };
-      const h1 = toScreen(3, -3);
-      ctx.globalAlpha = houseAlpha(3);
-      drawHouseSprite(h1.sx, h1.sy, "house_red");
-      ctx.globalAlpha = 1;
-      const h2 = toScreen(6, -3);
-      ctx.globalAlpha = houseAlpha(6);
-      drawHouseSprite(h2.sx, h2.sy, "house_blue");
-      ctx.globalAlpha = 1;
+      for (const house of VILLAGE.houses) {
+        const lastRow = house.y + house.depth - 1;
+        if (wy !== lastRow) continue;
+        const h = toScreen(house.x, lastRow);
+        const front = lastRow + 0.6;
+        ctx.globalAlpha = player.y >= front || player.x < house.x - 0.4 || player.x > house.x + house.width + 0.4
+          ? 1 : Math.min(1, 0.35 + (front - player.y) * 0.5);
+        drawHouseSprite(h.sx, h.sy, house.sprite);
+        ctx.globalAlpha = 1;
+      }
     }
     if (player.z === 0 && wy === NPC_POS.y) {
       const n = toScreen(NPC_POS.x, NPC_POS.y);
@@ -1001,9 +990,9 @@ function render(now: number) {
         ctx.fillStyle = "#ffe9bd";
         ctx.font = "11px sans-serif";
         ctx.textAlign = "center";
-        ctx.fillText("梅婆婆", n.sx + TILE / 2, n.sy - TILE * 0.85);
+        ctx.fillText(NPC_POS.label, n.sx + TILE / 2, n.sy - TILE * 0.85);
       } else {
-        drawPerson(n.sx + TILE / 2, n.sy + 8, "#7a4d8f", "#4a2c5a", "梅婆婆");
+        drawPerson(n.sx + TILE / 2, n.sy + 8, "#7a4d8f", "#4a2c5a", NPC_POS.label);
       }
     }
     if (Math.floor(player.y) === wy || (player.y > wy && player.y < wy + 1)) {

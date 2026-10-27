@@ -7,7 +7,7 @@ v2 boards are clean uniform grids on a taupe background:
 - characters.jpg 750x375: 8 cols x 3 rows (front/back/side)
 - trees-houses.jpg 750x563: 6 trees over 4 houses
 
-Output PNGs go to web/assets/ (same sprite names the renderer already uses).
+Output PNGs go to cocos/assets/resources/art/ (shared by Cocos and Web).
 Re-run: python3 tools/slice_assets_v2.py
 """
 from PIL import Image, ImageDraw
@@ -15,7 +15,7 @@ import os, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REF = os.path.join(ROOT, "assets", "reference", "v2")
-OUT = os.path.join(ROOT, "web", "assets")
+OUT = os.path.join(ROOT, "cocos", "assets", "resources", "art")
 os.makedirs(OUT, exist_ok=True)
 
 

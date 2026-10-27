@@ -1,0 +1,105 @@
+[
+  {
+    "__type__": "cc.SceneAsset",
+    "_name": "Main",
+    "_objFlags": 0,
+    "_native": "",
+    "scene": {
+      "__id__": 1
+    }
+  },
+  {
+    "__type__": "cc.Scene",
+    "_name": "Main",
+    "_objFlags": 0,
+    "_parent": null,
+    "_children": [
+      {
+        "__id__": 2
+      }
+    ],
+    "_active": true,
+    "_components": [],
+    "_prefab": null,
+    "autoReleaseAssets": false,
+    "_id": "1ed4e3ec-62eb-49f0-b72d-2ce3ad8150db"
+  },
+  {
+    "__type__": "cc.Node",
+    "_name": "GameRoot",
+    "_objFlags": 0,
+    "_parent": {
+      "__id__": 1
+    },
+    "_children": [],
+    "_active": true,
+    "_components": [
+      {
+        "__id__": 3
+      },
+      {
+        "__id__": 4
+      }
+    ],
+    "_prefab": null,
+    "_lpos": {
+      "__type__": "cc.Vec3",
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "_lrot": {
+      "__type__": "cc.Quat",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": 1
+    },
+    "_lscale": {
+      "__type__": "cc.Vec3",
+      "x": 1,
+      "y": 1,
+      "z": 1
+    },
+    "_layer": 1073741824,
+    "_euler": {
+      "__type__": "cc.Vec3",
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "_id": "3a9d5094-b58c-4db3-bd80-8f81aad709e6"
+  },
+  {
+    "__type__": "c9205rWrQ1BCbPGX+7KZi5I",
+    "_name": "",
+    "_objFlags": 0,
+    "node": {
+      "__id__": 2
+    },
+    "_enabled": true,
+    "__prefab": null,
+    "moveSpeed": 4,
+    "acceleration": 11,
+    "digSeconds": 0.42,
+    "cameraFollow": 8,
+    "tileSize": 72,
+    "rowHeight": 62,
+    "worldContent": {
+      "__uuid__": "9eb6d2db-1e6e-46e3-9fe5-2f5bad0bffd2",
+      "__expectedType__": "cc.JsonAsset"
+    },
+    "_id": "230c2bdb-9b67-40a3-bc2a-7b8380135922"
+  },
+  {
+    "__type__": "4a8e6H//oFLTJ6phLngRMbg",
+    "_name": "",
+    "_objFlags": 0,
+    "node": {
+      "__id__": 2
+    },
+    "_enabled": true,
+    "__prefab": null,
+    "_id": "7aae0c7d-9eaf-4f8e-b525-292353bd5282"
+  }
+]

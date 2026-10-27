@@ -2,13 +2,22 @@
 // No test framework on purpose: plain node:assert, zero dependencies.
 
 import assert from "node:assert";
-import { hashString } from "../core/rng.ts";
-import { stratumAt } from "../core/strata.ts";
-import { getTile, genChunk, guaranteedChestPos, CHEST_BLOCK } from "../core/worldgen.ts";
-import { WORDS_TIER1 } from "../core/vocab.ts";
-import { ChestSession, makeQuestion, REWARD_STEPS } from "../core/quiz.ts";
-import { MasteryBook, pickChestWord } from "../core/mastery.ts";
-import { newSave, setDiff, getDiff, placeStubborn, addItem, serializeSave, deserializeSave } from "../core/save.ts";
+import { hashString } from "../cocos/assets/core/rng.ts";
+import { stratumAt } from "../cocos/assets/core/strata.ts";
+import { getTile, genChunk, guaranteedChestPos, CHEST_BLOCK } from "../cocos/assets/core/worldgen.ts";
+import { WORDS_TIER1 } from "../cocos/assets/core/vocab.ts";
+import { ChestSession, makeQuestion, REWARD_STEPS } from "../cocos/assets/core/quiz.ts";
+import { MasteryBook, pickChestWord } from "../cocos/assets/core/mastery.ts";
+import { newSave, setDiff, getDiff, placeStubborn, addItem, serializeSave, deserializeSave } from "../cocos/assets/data/player-data/save.ts";
+import { PlayerStore } from "../cocos/assets/data/player-data/PlayerStore.ts";
+import { PLAYER_STORAGE_KEY } from "../cocos/assets/data/constants/GameRules.ts";
+import { readWorldContent } from "../cocos/assets/data/external-files/WorldContent.ts";
+import { Expedition } from "../cocos/assets/core/Expedition.ts";
+import { VILLAGE } from "../cocos/assets/data/external-files/Village.ts";
+import { SALT, WORD_DROP_CHANCE, WORD_PICKUP_COINS } from "../cocos/assets/data/constants/GameRules.ts";
+import { hashCoords } from "../cocos/assets/core/rng.ts";
+import { ART_NAMES, ORE_ART } from "../cocos/assets/data/resource-config/ArtCatalog.ts";
+import { readFileSync } from "node:fs";
 
 let passed = 0;
 function check(name: string, fn: () => void) {
@@ -157,6 +166,170 @@ check("save round-trips through JSON unchanged", () => {
   assert.deepEqual(back, save);
   assert.equal(getDiff(back, 3, 4, 12), "dug");
   assert.equal(MasteryBook.deserialize(back.mastery).get("gold").status, "learning");
+});
+
+check("player storage resumes position and refuses invalid saves without overwriting", () => {
+  const values = new Map<string, string>();
+  let writes = 0;
+  const store = new PlayerStore({ getItem: k => values.get(k) ?? null, setItem: (k, v) => { writes++; values.set(k, v); } });
+  const slot = store.load("resume-test");
+  slot.position = { x: -12.5, y: 8.5, z: 19 };
+  slot.game.maxDepth = 19;
+  store.save(slot);
+  assert.deepEqual(store.load("ignored-new-seed"), slot);
+  values.set(PLAYER_STORAGE_KEY, '{"version":99}');
+  assert.throws(() => store.load("resume-test"));
+  assert.equal(writes, 1);
+  assert.equal(values.get(PLAYER_STORAGE_KEY), '{"version":99}');
+  assert.throws(() => deserializeSave(JSON.stringify({ ...newSave("bad"), inventory: { coin: -1 } })));
+  const old = newSave("old-v1") as any;
+  delete old.seenWords;
+  assert.deepEqual(deserializeSave(JSON.stringify(old)).seenWords, []);
+});
+
+check("storage write failures propagate while the old slot survives", () => {
+  const original = "existing slot";
+  let stored = original;
+  const store = new PlayerStore({ getItem: () => stored, setItem: () => { throw new Error("quota exceeded"); } });
+  const slot = new PlayerStore({ getItem: () => null, setItem: () => {} }).load("quota");
+  assert.throws(() => store.save(slot), /quota exceeded/);
+  assert.equal(stored, original);
+});
+
+check("external world content rejects incomplete or unknown-version data", () => {
+  const valid = { version: 1, title: "地心寻词", seedString: "content-world", welcome: "开始探索" };
+  assert.equal(readWorldContent(valid).seedString, "content-world");
+  assert.throws(() => readWorldContent({ ...valid, seedString: "" }));
+  assert.throws(() => readWorldContent({ ...valid, version: 2 }));
+  assert.throws(() => readWorldContent(null));
+});
+
+const TUNING = { moveSpeed: 4, acceleration: 11, digSeconds: 0.42 };
+const freshSlot = (seed = "expedition-test") => new PlayerStore({ getItem: () => null, setItem: () => {} }).load(seed);
+
+check("Cocos expedition moves without crossing blocks and keeps shafts returnable", () => {
+  const expedition = new Expedition(freshSlot());
+  expedition.descend();
+  assert.equal(expedition.slot.position.z, 1);
+  assert.equal(expedition.tileAt(0, 0).type, "shaft");
+  for (let i = 0; i < 60; i++) expedition.tick(1 / 60, 1, 0, false, TUNING);
+  assert.equal(expedition.collides(expedition.slot.position.x, expedition.slot.position.y), false);
+  assert.ok(expedition.slot.position.x < 1);
+  expedition.ascend();
+  assert.equal(expedition.slot.position.z, 0);
+  expedition.descend();
+  expedition.descend();
+  assert.equal(expedition.slot.position.z, 2);
+  expedition.ascend();
+  expedition.ascend();
+  assert.equal(expedition.slot.position.z, 0);
+});
+
+check("Cocos expedition opens an actual generated chest and persists mastery and rewards", () => {
+  const slot = freshSlot();
+  const chest = guaranteedChestPos(slot.game.seed, 0, 0, 1);
+  slot.position = { x: chest.x - 0.5, y: chest.y + 0.5, z: 1 };
+  setDiff(slot.game, chest.x - 1, chest.y, 1, "dug");
+  const expedition = new Expedition(slot);
+  expedition.tick(0.01, 1, 0, true, TUNING);
+  assert.ok(expedition.quiz);
+  const word = expedition.quiz.entry.word;
+  expedition.answer(expedition.quiz.session.question.correctIndex);
+  assert.equal(expedition.quiz, null);
+  assert.equal(getDiff(slot.game, chest.x, chest.y, 1), "dug");
+  assert.equal(slot.game.inventory.coin, 10);
+  assert.equal(slot.game.mastery[word].status, "learning");
+  assert.ok(slot.game.seenWords.includes(word));
+});
+
+check("Cocos downward digging preserves sealed tiles and mined blocks become walkable", () => {
+  const slot = freshSlot();
+  placeStubborn(slot.game, 0, 0, 1, "apple");
+  const expedition = new Expedition(slot);
+  expedition.descend();
+  assert.equal(slot.position.z, 0);
+  assert.equal(getDiff(slot.game, 0, 0, 0), undefined);
+  delete slot.game.diffs["0,0,1"];
+  delete slot.game.stubborn["0,0,1"];
+  expedition.descend();
+  for (let i = 0; i < 20 && getDiff(slot.game, 1, 0, 1) !== "dug"; i++) expedition.tick(0.05, 1, 0, true, TUNING);
+  assert.equal(getDiff(slot.game, 1, 0, 1), "dug");
+  assert.equal(expedition.tileAt(1, 0).solid, false);
+});
+
+check("village houses and May block movement but are never digging targets", () => {
+  const slot = freshSlot();
+  slot.position = { x: VILLAGE.npc.x + 0.5, y: VILLAGE.npc.y + 1.5, z: 0 };
+  const expedition = new Expedition(slot);
+  assert.equal(expedition.canTalkToNpc(), true);
+  assert.equal(expedition.collides(3.5, -3.5), true);
+  assert.equal(expedition.collides(5.5, -1.5), true);
+  expedition.facing = { x: 0, y: -1 };
+  const target = expedition.findTarget();
+  if (target) assert.notEqual(expedition.tileAt(target.x, target.y).type, "village");
+  expedition.descend();
+  assert.equal(expedition.canTalkToNpc(), false);
+  assert.notEqual(expedition.tileAt(VILLAGE.npc.x, VILLAGE.npc.y).type, "village");
+});
+
+check("an old position inside a restored house is moved out without changing inventory or world diffs", () => {
+  const slot = freshSlot();
+  slot.position = { x: 4, y: -3, z: 0 };
+  slot.game.inventory.coin = 27;
+  const before = serializeSave(slot.game);
+  const expedition = new Expedition(slot);
+  assert.equal(expedition.collides(slot.position.x, slot.position.y), false);
+  assert.equal(serializeSave(slot.game), before);
+  assert.equal(expedition.dirty, true);
+});
+
+check("walking into a pit descends, while climbing out does not bounce back down", () => {
+  const slot = freshSlot();
+  setDiff(slot.game, 1, 0, 0, "pit");
+  const expedition = new Expedition(slot);
+  for (let i = 0; i < 30; i++) expedition.tick(1 / 60, 1, 0, false, TUNING);
+  assert.equal(slot.position.z, 1);
+  expedition.ascend();
+  for (let i = 0; i < 90; i++) expedition.tick(1 / 60, 0, 0, false, TUNING);
+  assert.equal(slot.position.z, 0);
+  for (let i = 0; i < 28; i++) expedition.tick(1 / 60, -1, 0, false, TUNING);
+  for (let i = 0; i < 38; i++) expedition.tick(1 / 60, 1, 0, false, TUNING);
+  assert.equal(slot.position.z, 1);
+});
+
+check("word drops are deterministic per mined tile and collected only once", () => {
+  const slot = freshSlot("drop-fixture");
+  let x = 1;
+  while (hashCoords(slot.game.seed, x, 0, 1, SALT.wordDrop) / 4294967296 >= WORD_DROP_CHANCE || getTile(slot.game.seed, x, 0, 1).type === "chest") x++;
+  const mine = () => {
+    const next = freshSlot("drop-fixture");
+    next.position = { x: x - 0.5, y: 0.5, z: 1 };
+    setDiff(next.game, x - 1, 0, 1, "dug");
+    const expedition = new Expedition(next);
+    for (let i = 0; i < 100 && getDiff(next.game, x, 0, 1) !== "dug"; i++) expedition.tick(0.05, 1, 0, true, TUNING);
+    return expedition;
+  };
+  const expedition = mine();
+  assert.equal(expedition.wordDrops.length, 1);
+  assert.equal(mine().wordDrops[0].entry.word, expedition.wordDrops[0].entry.word);
+  const word = expedition.wordDrops[0].entry.word;
+  expedition.slot.position.x = x + 0.5;
+  expedition.velocity.x = 0;
+  expedition.tick(0.01, 0, 0, false, TUNING);
+  expedition.tick(0.01, 0, 0, false, TUNING);
+  assert.equal(expedition.wordDrops.length, 0);
+  assert.ok(expedition.slot.game.seenWords.includes(word));
+  assert.equal(expedition.slot.game.inventory.coin, WORD_PICKUP_COINS);
+});
+
+check("all approved sprite names resolve to real PNG assets", () => {
+  assert.equal(new Set(ART_NAMES).size, 31);
+  for (const name of ART_NAMES) {
+    const bytes = readFileSync(new URL("../cocos/assets/resources/art/" + name + ".png", import.meta.url));
+    assert.equal(bytes.toString("ascii", 1, 4), "PNG");
+    assert.ok(bytes.readUInt32BE(16) > 0 && bytes.readUInt32BE(20) > 0);
+  }
+  for (const name of Object.values(ORE_ART)) assert.ok((ART_NAMES as readonly string[]).includes(name));
 });
 
 console.log("\n" + passed + " test groups passed");

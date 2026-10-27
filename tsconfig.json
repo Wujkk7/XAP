@@ -1,1 +1,20 @@
-{"compilerOptions":{"module":"NodeNext","moduleResolution":"NodeNext","noEmit":true,"skipLibCheck":true,"strict":true,"target":"ES2022","types":["node"]},"include":["core/**/*.ts","test/**/*.ts"]}
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2022",
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "cocos/assets/core/**/*.ts",
+    "cocos/assets/data/constants/**/*.ts",
+    "cocos/assets/data/external-files/**/*.ts",
+    "cocos/assets/data/player-data/**/*.ts",
+    "test/**/*.ts"
+  ]
+}

@@ -14,19 +14,22 @@ XAP：像素风、无限程序化生成的挖宝游戏（竖屏、斜后方俯�
 
 ## 架构铁律
 
-- `core/` 是不依赖任何引擎的纯 TypeScript：世界生成、词汇、答题、掌握度、存档。
+- `cocos/assets/core/` 是不依赖任何引擎的纯 TypeScript：世界生成、词汇、答题、掌握度、探险控制。
+  五类数据归 `cocos/assets/data/{constants,exposed-variables,resource-config,external-files,player-data}/`，详见其中 README。
+  Web 和 Node 测试直接引用这些文件，不另拷一份 core。
   **core 里禁止 import 引擎 API（cc、wx、tt 等）**，禁止用 `Math.random()` 和当前时间
   做世界生成——世界必须是 `(seed, x, y, z)` 的纯函数，全设备一致。
 - core 只用可擦除的 TS 语法（不用 enum 值、不用参数属性），
   这样 Node 24 可以直接跑 `.ts` 做测试，零依赖。
 - 引擎层（Cocos Creator 场景/渲染/输入/平台 API）只调用 core，不复制 core 的逻辑。
-- 存档格式见 `core/save.ts`：只存种子 + 差异 + 学习进度，字段一旦发布不许改名；
+- 存档格式见 `cocos/assets/data/player-data/save.ts`：只存种子 + 差异 + 学习进度，字段一旦发布不许改名；
   要改先升 `version` 并写迁移。
+  Cocos 的 PlayerStore v1 容器附带角色位置；真实数据写设备存储，不进 Git。
 
 ## 怎么验证
 
 ```bash
-npm test        # 13 组核心测试，必须全绿才能提交
+npm test        # 24 组核心、数据与资源测试，必须全绿才能提交；也可 node test/run_tests.ts
 npm run demo    # ASCII 地图 + 示例题目，肉眼检查生成
 ```
 
@@ -62,9 +65,31 @@ npm run demo    # ASCII 地图 + 示例题目，肉眼检查生成
   跑动动作（倾斜摆动＋扬尘）；树/房渐隐改连续过渡；HUD 节流；hint 移右上；
   地表开阔平原化（树林成簇＋清空出生/村庄＋草地统一打底贴花）；
   竖井 shaft 双端标记＋头顶坑口爬升（兼容旧存档）
-- [ ] 下一步：真机试玩反馈后调手感数值（移动速度、挖掘时长、镜头），再搭 Cocos
-  工程骨架，把 web 原型的视图层移植过去（core 不动；精灵改走图集，不再 base64）
+- [ ] 下一步：在 Cocos 内/真机试玩调手感（移动速度、挖掘时长、镜头），验证原生/小游戏端与资源打包性能；再按三系混合路线逐步增加内容。
 - [ ] 词库扩充：tier2+ 数据文件（格式同 `core/vocab.ts` 的 WordEntry）
+
+### Cocos 首轮接入（2026-10-27）
+
+- Creator 3.8.8 工程位于 `cocos/`；打开 `assets/scenes/Main.scene` 后预览。
+- 核心代码移动至 `cocos/assets/core/`，存档代码归五类数据的 player-data；旧 Web/Node 引用已更新。
+- 固定数值归 constants，地层表与词表各保留唯一数据来源；手感由 GameRoot 上的 GameTuning 暴露到检查器。
+- 独立开局 JSON 通过场景里的 JsonAsset 引用读取；玩家数据校验失败不自动覆盖，保存异常有提示。
+- 基础接入：配置色地图、摇杆/键盘、碰撞/拐角助滑、挖掘、下挖/上梯、宝箱与顽固石答题、图鉴、自动存档与位置续玩。
+- 未迁移：原创精灵、村庄/NPC、碎屑与词卡、自动踏入坑洞下潜；尚未验证手机手感或原生/小游戏构建。
+- `web/assets` 的原始 PNG 不在原仓库中；已提交 Web 产物能保留，源代码重建仍须恢复 PNG。
+- 已验证：19 组核心与数据测试、Cocos 严格 TypeScript 检查、Creator Web Mobile 构建（退出码 36）；独立 Edge 浏览器中验证启动、键盘/触屏摇杆、下挖、长按挖掘、刷新续档，无运行异常。手机与原生端待验证。
+- 空 Cocos 模板自带的无提交 `.git` 已备份到根目录忽略项 `.local-backups/cocos-git`，工程由外层 XAP 仓库统一管理。
+
+### Cocos 原创美术与玩法恢复（2026-10-27，接续上节）
+
+- 已检查 origin/main，仍为 cc037d2。原 PNG 未单独提交，但已从 web/game.js 的定稿精灵表无损恢复 31 张至 `cocos/assets/resources/art/`；来源与恢复方式见 resource-config/ART_SOURCE.md。
+- WorldView 使用 Cocos SpriteFrame、有限节点复用、前后排序、遮挡渐隐与 nearest 过滤；地块按 720 设计分辨率设 72×62，与原 360 视口下 36×31 比例一致。
+- 已恢复村庄两栋房、道路/耕地、梅婆婆双语对话与碰撞，近旁 E 键改为交谈；布局台词在 external-files/Village.ts，Web 也改为共用。
+- 已恢复挖掘/碎裂/开箱粒子、步频摆动与扬尘、井口走入下潜及上梯保护、16% 词卡掉落与拾取、每 10m 深度单词提示、完整 20 词图鉴条目。
+- 常量新增在 GameRules.ts；资源映射在 ArtCatalog.ts；GameSave v1 不变，新增瞬时粒子/词卡不写存档。旧位置若落在新恢复的房屋内会推离，已有背包与差异不变。
+- Web 构建与 v2 切图工具改用共用 PNG 目录；Web 产物已重建，原美术缺失导致不能重建的问题已解决。早期非原创参考切片工具仍只作研究，不应输出覆盖正式素材。
+- 已验证：24 组核心/数据/资源测试、严格 TS 检查、Creator Web Mobile 构建（退出码 36）、独立浏览器的精灵加载、键盘/触屏、对话暂停、触屏开箱、图鉴与刷新续档；Web 原有冒烟与移动 fuzz 通过。
+- 尚未验证：手机手感、原生与小游戏构建、编辑器内交互实测；尚无角色逐帧动画、音效或 tier2+ 内容。
 
 ## 协作约定
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>XAP — 挖宝学英语（原型）</title>
+<title>地心寻词 — 挖宝大冒险（原型）</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html, body { height:100%; background:#14100c; overflow:hidden; overscroll-behavior:none; font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
@@ -89,11 +89,36 @@
 <script>
 "use strict";
 (() => {
-  var __defProp = Object.defineProperty;
-  var __defNormalProp = (obj, key2, value) => key2 in obj ? __defProp(obj, key2, { enumerable: true, configurable: true, writable: true, value }) : obj[key2] = value;
-  var __publicField = (obj, key2, value) => __defNormalProp(obj, typeof key2 !== "symbol" ? key2 + "" : key2, value);
+  // cocos/assets/data/constants/GameRules.ts
+  var SAVE_VERSION = 1;
+  var CHEST_BLOCK = 25;
+  var CHEST_RANDOM_P = 15e-4;
+  var CAVE_CELL = 4;
+  var VEIN_CELL = 3;
+  var REVIEW_GAP_M = 15;
+  var STUBBORN_MIN = 10;
+  var STUBBORN_SPAN = 21;
+  var REWARD_STEPS = [1, 0.7, 0.4];
+  var FLOOR_REWARD = 0.25;
+  var MAX_ATTEMPTS = 3;
+  var WORD_DROP_CHANCE = 0.16;
+  var WORD_PICKUP_RADIUS = 0.55;
+  var WORD_PICKUP_COINS = 2;
+  var MAX_WORD_DROPS = 12;
+  var SALT = {
+    base: 1,
+    cave: 2,
+    veinCell: 3,
+    veinFill: 4,
+    chestRandom: 5,
+    chestBlock: 6,
+    surfaceKind: 7,
+    quiz: 100,
+    wordDrop: 101,
+    dropWord: 102
+  };
 
-  // core/rng.ts
+  // cocos/assets/core/rng.ts
   function hashString(s) {
     let h = 2166136261;
     for (let i = 0; i < s.length; i++) {
@@ -125,17 +150,8 @@
       return ((t ^ t >>> 14) >>> 0) / 4294967296;
     };
   }
-  var SALT = {
-    base: 1,
-    cave: 2,
-    veinCell: 3,
-    veinFill: 4,
-    chestRandom: 5,
-    chestBlock: 6,
-    surfaceKind: 7
-  };
 
-  // core/strata.ts
+  // cocos/assets/data/constants/Strata.ts
   var STRATA = [
     { id: 1, name: "\u8868\u571F\u5C42", minDepth: 1, maxDepth: 30, vocabTier: 1, cefr: "A1", poolSize: 600, hardness: 1, baseTile: "dirt", oreTile: "ore_copper", chestKind: "wood" },
     { id: 2, name: "\u6D45\u5CA9\u5C42", minDepth: 31, maxDepth: 100, vocabTier: 2, cefr: "A2", poolSize: 1600, hardness: 2, baseTile: "sandstone", oreTile: "ore_iron", chestKind: "iron" },
@@ -143,6 +159,8 @@
     { id: 4, name: "\u6DF1\u6E0A\u5C42", minDepth: 251, maxDepth: 500, vocabTier: 4, cefr: "B2", poolSize: 6e3, hardness: 5, baseTile: "basalt", oreTile: "ore_diamond", chestKind: "mithril" },
     { id: 5, name: "\u5730\u5FC3\u5C42", minDepth: 501, maxDepth: Infinity, vocabTier: 5, cefr: "C1", poolSize: 8e3, hardness: 8, baseTile: "obsidian", oreTile: "ore_starcore", chestKind: "starcore" }
   ];
+
+  // cocos/assets/core/strata.ts
   function stratumAt(depth) {
     for (const s of STRATA) {
       if (depth >= s.minDepth && depth <= s.maxDepth) return s;
@@ -150,11 +168,7 @@
     return STRATA[STRATA.length - 1];
   }
 
-  // core/worldgen.ts
-  var CHEST_BLOCK = 25;
-  var CHEST_RANDOM_P = 15e-4;
-  var CAVE_CELL = 4;
-  var VEIN_CELL = 3;
+  // cocos/assets/core/worldgen.ts
   function surfaceTile(seed2, x, y) {
     if (Math.abs(x) <= 2 && Math.abs(y) <= 2) return { type: "grass", hardness: 0, stratum: 0 };
     if (x >= 2 && x <= 8 && y >= -5 && y <= -1) return { type: "grass", hardness: 0, stratum: 0 };
@@ -192,7 +206,7 @@
     return { type: s.baseTile, hardness: s.hardness, stratum: s.id };
   }
 
-  // core/vocab.ts
+  // cocos/assets/data/external-files/Tier1Vocabulary.ts
   var WORDS_TIER1 = [
     { word: "apple", meaning: "\u82F9\u679C", tier: 1, theme: "food", example: "I eat an apple every day.", distractors: ["\u68A8\u5B50", "\u9999\u8549", "\u6A58\u5B50"] },
     { word: "dig", meaning: "\u6316", tier: 1, theme: "action", example: "We dig a deep hole.", distractors: ["\u780D", "\u79CD", "\u63A8"] },
@@ -216,10 +230,7 @@
     { word: "box", meaning: "\u76D2\u5B50", tier: 1, theme: "daily", example: "Open the box slowly.", distractors: ["\u888B\u5B50", "\u7BEE\u5B50", "\u74F6\u5B50"] }
   ];
 
-  // core/quiz.ts
-  var REWARD_STEPS = [1, 0.7, 0.4];
-  var FLOOR_REWARD = 0.25;
-  var MAX_ATTEMPTS = 3;
+  // cocos/assets/core/quiz.ts
   function makeQuestion(entry, shuffleSeed) {
     const options = [entry.meaning, ...entry.distractors];
     const rand = rngFrom(shuffleSeed);
@@ -236,9 +247,8 @@
   }
   var ChestSession = class {
     constructor(entry, shuffleSeed) {
-      __publicField(this, "question");
-      __publicField(this, "attempts", 0);
-      __publicField(this, "openedFlag", false);
+      this.attempts = 0;
+      this.openedFlag = false;
       this.question = makeQuestion(entry, shuffleSeed);
     }
     get attemptsUsed() {
@@ -268,16 +278,13 @@
     }
   };
 
-  // core/mastery.ts
-  var REVIEW_GAP_M = 15;
-  var STUBBORN_MIN = 10;
-  var STUBBORN_SPAN = 21;
+  // cocos/assets/core/mastery.ts
   function freshState(word) {
     return { word, status: "unknown", correctStreak: 0, encounters: 0, wrongCount: 0, lastSeenDepth: 0, dueDepth: 0 };
   }
   var MasteryBook = class _MasteryBook {
     constructor() {
-      __publicField(this, "states", /* @__PURE__ */ new Map());
+      this.states = /* @__PURE__ */ new Map();
     }
     get(word) {
       let s = this.states.get(word);
@@ -353,13 +360,13 @@
     return candidates[Math.floor(rand() * candidates.length)];
   }
 
-  // core/save.ts
+  // cocos/assets/data/player-data/save.ts
   function key(x, y, z) {
     return x + "," + y + "," + z;
   }
   function newSave(seedString) {
     return {
-      version: 1,
+      version: SAVE_VERSION,
       seedString,
       seed: hashString(seedString),
       diffs: {},
@@ -390,8 +397,43 @@
   }
   function deserializeSave(json) {
     const data = JSON.parse(json);
-    if (data.version !== 1) throw new Error("unsupported save version: " + data.version);
+    if (!isRecord(data) || data.version !== SAVE_VERSION) throw new Error("unsupported save version");
+    if (typeof data.seedString !== "string" || data.seed !== hashString(data.seedString) || !isStringMap(data.diffs) || !isStringMap(data.stubborn) || !isRecord(data.inventory) || !Object.values(data.inventory).every((v) => Number.isSafeInteger(v) && v >= 0) || !Number.isSafeInteger(data.maxDepth) || data.maxDepth < 0 || !Number.isSafeInteger(data.pickaxeLevel) || data.pickaxeLevel < 1 || !isRecord(data.mastery)) throw new Error("invalid save data");
+    for (const [word, state] of Object.entries(data.mastery)) {
+      if (!isRecord(state) || state.word !== word || !["unknown", "learning", "mastered"].includes(state.status) || ![state.correctStreak, state.encounters, state.wrongCount, state.lastSeenDepth, state.dueDepth].every((v) => Number.isSafeInteger(v) && v >= 0)) throw new Error("invalid mastery data");
+    }
+    if (data.seenWords === void 0) data.seenWords = [];
+    if (!Array.isArray(data.seenWords) || !data.seenWords.every((v) => typeof v === "string")) throw new Error("invalid word collection");
     return data;
+  }
+  function isRecord(value) {
+    return !!value && typeof value === "object" && !Array.isArray(value);
+  }
+  function isStringMap(value) {
+    return isRecord(value) && Object.values(value).every((v) => typeof v === "string");
+  }
+
+  // cocos/assets/data/external-files/Village.ts
+  var VILLAGE = {
+    houses: [
+      { x: 3, y: -4, width: 2, depth: 2, sprite: "house_red" },
+      { x: 6, y: -4, width: 2, depth: 2, sprite: "house_blue" }
+    ],
+    npc: { x: 5, y: -2, name: "\u6885\u5A46\u5A46 May", label: "\u6885\u5A46\u5A46", sprite: "tom_front" },
+    paths: [
+      { minX: -4, maxX: 10, minY: -1, maxY: -1 },
+      { minX: 5, maxX: 5, minY: -1, maxY: 4 }
+    ],
+    farm: { minX: -7, maxX: -5, minY: -4, maxY: -2 },
+    dialogue: [
+      { en: "Hello! I am May. Dig deep, find gold!", zh: "\u4F60\u597D\uFF01\u6211\u662F\u6885\u5A46\u5A46\u3002\u5F80\u6DF1\u6316\uFF0C\u80FD\u627E\u5230\u91D1\u5B50\uFF01" },
+      { en: "A chest needs a word. The word is the key.", zh: "\u5B9D\u7BB1\u9700\u8981\u4E00\u4E2A\u5355\u8BCD\u3002\u5355\u8BCD\u5C31\u662F\u94A5\u5319\u3002" },
+      { en: "Wrong word? No fear. It sleeps under the stone.", zh: "\u7B54\u9519\u8BCD\uFF1F\u522B\u6015\u3002\u5B83\u7761\u5728\u77F3\u5934\u4E0B\u9762\u7B49\u4F60\u3002" },
+      { en: "Trees give wood. Wood makes good tools.", zh: "\u6811\u7ED9\u6728\u5934\u3002\u6728\u5934\u80FD\u505A\u597D\u5DE5\u5177\u3002" }
+    ]
+  };
+  function villageBlocked(x, y, depth) {
+    return depth === 0 && (VILLAGE.houses.some((h) => x >= h.x && x < h.x + h.width && y >= h.y && y < h.y + h.depth) || x === VILLAGE.npc.x && y === VILLAGE.npc.y);
   }
 
   // web/src/sprites.ts
@@ -482,13 +524,7 @@
     }
     return { type: t.type, hardness: Math.max(1, t.hardness), solid: true };
   }
-  var HOUSE_TILES = /* @__PURE__ */ new Set(["3,-4", "4,-4", "3,-3", "4,-3", "6,-4", "7,-4", "6,-3", "7,-3"]);
-  var NPC_POS = { x: 5, y: -2 };
-  function villageBlocked(wx, wy, z) {
-    if (z !== 0) return false;
-    if (HOUSE_TILES.has(wx + "," + wy)) return true;
-    return wx === NPC_POS.x && wy === NPC_POS.y;
-  }
+  var NPC_POS = VILLAGE.npc;
   function isSolid(wx, wy, z) {
     return villageBlocked(wx, wy, z) || tileAt(wx, wy, z).solid;
   }
@@ -729,16 +765,10 @@
   function actButton() {
     descendOrAct();
   }
-  var NPC_LINES = [
-    { name: "\u6885\u5A46\u5A46 May", en: "Hello! I am May. Dig deep, find gold!", zh: "\u4F60\u597D\uFF01\u6211\u662F\u6885\u5A46\u5A46\u3002\u5F80\u6DF1\u6316\uFF0C\u80FD\u627E\u5230\u91D1\u5B50\uFF01" },
-    { name: "\u6885\u5A46\u5A46 May", en: "A chest needs a word. The word is the key.", zh: "\u5B9D\u7BB1\u9700\u8981\u4E00\u4E2A\u5355\u8BCD\u3002\u5355\u8BCD\u5C31\u662F\u94A5\u5319\u3002" },
-    { name: "\u6885\u5A46\u5A46 May", en: "Wrong word? No fear. It sleeps under the stone.", zh: "\u7B54\u9519\u8BCD\uFF1F\u522B\u6015\u3002\u5B83\u7761\u5728\u77F3\u5934\u4E0B\u9762\u7B49\u4F60\u3002" },
-    { name: "\u6885\u5A46\u5A46 May", en: "Trees give wood. Wood makes good tools.", zh: "\u6811\u7ED9\u6728\u5934\u3002\u6728\u5934\u80FD\u505A\u597D\u5DE5\u5177\u3002" }
-  ];
   var npcIdx = 0;
   function talkToNpc() {
-    const line = NPC_LINES[npcIdx++ % NPC_LINES.length];
-    $("npcName").textContent = line.name;
+    const line = VILLAGE.dialogue[npcIdx++ % VILLAGE.dialogue.length];
+    $("npcName").textContent = VILLAGE.npc.name;
     $("npcText").innerHTML = '<span class="en"></span><br><span class="zh"></span>';
     $("npcText").querySelector(".en").textContent = line.en;
     $("npcText").querySelector(".zh").textContent = line.zh;
@@ -825,18 +855,18 @@
   }
   function maybeSpawnDrop(x, y, type) {
     if (type === "chest" || type === "stubborn") return;
-    if (Math.random() > 0.16) return;
+    if (Math.random() > WORD_DROP_CHANCE) return;
     drops.push({ x, y, z: player.z, entry: pickDropWord() });
-    if (drops.length > 12) drops.shift();
+    if (drops.length > MAX_WORD_DROPS) drops.shift();
   }
   function collectDrops() {
     for (let i = drops.length - 1; i >= 0; i--) {
       const d = drops[i];
       if (d.z !== player.z) continue;
-      if (Math.hypot(player.x - (d.x + 0.5), player.y - (d.y + 0.5)) < 0.55) {
+      if (Math.hypot(player.x - (d.x + 0.5), player.y - (d.y + 0.5)) < WORD_PICKUP_RADIUS) {
         drops.splice(i, 1);
         markSeen(d.entry.word);
-        coins += 2;
+        coins += WORD_PICKUP_COINS;
         toast("\u8BCD\u5361 +" + d.entry.word + " \xB7 " + d.entry.meaning + "\uFF08\u56FE\u9274 " + save.seenWords.length + "/" + WORDS_TIER1.length + "\uFF09");
         persist();
       }
@@ -1133,10 +1163,11 @@
     5: "rgba(40,25,70,0.44)"
   };
   function isPathTile(wx, wy) {
-    return wy === -1 && wx >= -4 && wx <= 10 || wx === 5 && wy >= -1 && wy <= 4;
+    return VILLAGE.paths.some((path) => wx >= path.minX && wx <= path.maxX && wy >= path.minY && wy <= path.maxY);
   }
   function isFarmTile(wx, wy) {
-    return wx >= -7 && wx <= -5 && wy >= -4 && wy <= -2;
+    const farm = VILLAGE.farm;
+    return wx >= farm.minX && wx <= farm.maxX && wy >= farm.minY && wy <= farm.maxY;
   }
   function drawGroundSprite(name, sx, sy) {
     ctx.drawImage(IMG[name], sx - 1, sy - 1, TILE + 2, ROW_H + 2);
@@ -1429,19 +1460,16 @@
         const { sx, sy } = toScreen(wx, wy);
         drawTile(sx, sy, wx, wy);
       }
-      if (player.z === 0 && wy === -3) {
-        const houseAlpha = (hx) => {
-          if (player.y >= -2.4 || player.x < hx - 0.4 || player.x > hx + 2.4) return 1;
-          return Math.min(1, 0.35 + (-2.4 - player.y) * 0.5);
-        };
-        const h1 = toScreen(3, -3);
-        ctx.globalAlpha = houseAlpha(3);
-        drawHouseSprite(h1.sx, h1.sy, "house_red");
-        ctx.globalAlpha = 1;
-        const h2 = toScreen(6, -3);
-        ctx.globalAlpha = houseAlpha(6);
-        drawHouseSprite(h2.sx, h2.sy, "house_blue");
-        ctx.globalAlpha = 1;
+      if (player.z === 0) {
+        for (const house of VILLAGE.houses) {
+          const lastRow = house.y + house.depth - 1;
+          if (wy !== lastRow) continue;
+          const h = toScreen(house.x, lastRow);
+          const front = lastRow + 0.6;
+          ctx.globalAlpha = player.y >= front || player.x < house.x - 0.4 || player.x > house.x + house.width + 0.4 ? 1 : Math.min(1, 0.35 + (front - player.y) * 0.5);
+          drawHouseSprite(h.sx, h.sy, house.sprite);
+          ctx.globalAlpha = 1;
+        }
       }
       if (player.z === 0 && wy === NPC_POS.y) {
         const n = toScreen(NPC_POS.x, NPC_POS.y);
@@ -1450,9 +1478,9 @@
           ctx.fillStyle = "#ffe9bd";
           ctx.font = "11px sans-serif";
           ctx.textAlign = "center";
-          ctx.fillText("\u6885\u5A46\u5A46", n.sx + TILE / 2, n.sy - TILE * 0.85);
+          ctx.fillText(NPC_POS.label, n.sx + TILE / 2, n.sy - TILE * 0.85);
         } else {
-          drawPerson(n.sx + TILE / 2, n.sy + 8, "#7a4d8f", "#4a2c5a", "\u6885\u5A46\u5A46");
+          drawPerson(n.sx + TILE / 2, n.sy + 8, "#7a4d8f", "#4a2c5a", NPC_POS.label);
         }
       }
       if (Math.floor(player.y) === wy || player.y > wy && player.y < wy + 1) {
@@ -1580,7 +1608,7 @@
   }
   persist();
   if (!localStorage.getItem("xap-seen")) {
-    toast("\u6B22\u8FCE\u6765\u5230 XAP \u6751 \xB7 \u53BB\u5730\u4E0B\u6316\u5B9D\u5427");
+    toast("\u6B22\u8FCE\u6765\u5230\u5730\u5FC3\u5BFB\u8BCD \xB7 \u53BB\u5730\u4E0B\u6316\u5B9D\u5427");
     try {
       localStorage.setItem("xap-seen", "1");
     } catch {

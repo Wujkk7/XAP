@@ -6,3 +6,6 @@ temp/
 *.log
 .DS_Store
 web/src/sprites.ts
+.local-checks/
+.local-backups/
+.local-sites/
