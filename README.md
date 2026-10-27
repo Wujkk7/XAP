@@ -2,6 +2,8 @@
 
 像素挖宝冒险游戏，英语词汇融入宝箱与探索。设计以 [DESIGN.md](DESIGN.md) 为准。
 
+Safari 私人远程试玩与版本记录见 [PREVIEW.md](PREVIEW.md)。
+
 ## Cocos Creator 预览
 
 1. 用 **Creator 3.8.8** 打开 `cocos/`。

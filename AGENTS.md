@@ -93,6 +93,8 @@ npm run demo    # ASCII 地图 + 示例题目，肉眼检查生成
 
 ## 协作约定
 
+- GitHub main 已包含 Cocos 当前版本；远程试玩见 PREVIEW.md。后续发布复用其中的 Sites 站点 ID 与 `.local-sites/xap-preview/` 工作目录，不重复创建站点；保持现有访问范围。
+
 - 每个 PR/提交要回答：做了什么、怎么验证的（贴测试结果）、还有什么没做。
 - 不要动 `PAX` 仓库；本项目只有 `Wujkk7/XAP`。
 - 数值（概率、深度、奖励）都集中在 core 的常量里，调数值只改常量并在提交里写明。
