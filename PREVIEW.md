@@ -12,8 +12,8 @@
 - 轻量界面：深度/金币常驻，右上背包与每页 8 词的图鉴，左下摇杆，右下长按挖掘与上下井/交谈；独立触点、面板暂停、短消息、横竖屏提示及安全区适配。
 - 运行内容：Creator 3.8.8 的 Web Mobile 构建，与本地验证版本相同。
 - 站点 ID：`appgprj_6ae05ff3aefc8191839dcfc092c6aa7f`。
-- 发布版本：`appgprj_6ae05ff3aefc8191839dcfc092c6aa7f~appgver_cf4c695e5a488191b6611c6a103bd2f1`。
-- 站点源码提交：`c36c074a39029a53efc84ed3a90706e41c88692c`；部署：`appgdep_6ae1ad026fcc8191ad0374b26be99cff`，2026-10-28 成功。
+- 整站发布版本：`appgprj_6ae05ff3aefc8191839dcfc092c6aa7f~appgver_72650efb2e6481919e599bbf0043ee22`。
+- 站点源码提交：`27ecf53f304eac777ca8576fe9f5d0dfcc23a3ee`；部署：`appgdep_6ae1b26719d48191b8ec64c87dc21cb3`，2026-10-28 成功。此次增加等距实验子目录，根路径阶段一产物保持原字节。
 - Site 本地工作目录：`.local-sites/xap-preview/`，其 `.openai/hosting.json` 保存站点身份；该目录不进入游戏源码仓库。
 - 部署状态：已成功发布；构建内 `source-version.json` 记录对应的游戏源码提交。
 
@@ -22,6 +22,16 @@
 Safari 试玩与 Creator 本地预览不会自动交换存档。
 
 ## 后续更新
+
+### 等距菱形视角体验版（实验分支）
+
+- 入口：[等距视角实验](https://xap-digging-preview-wujkk7.sugaryharp130.chatgpt.site/isometric/)。访问范围仍为原站点所有者私人预览。
+- 分支：`codex/isometric-view-lab`；游戏源码提交 `2d51e653719af368cb70326220e42b69e49a4f41`，不合并 main。
+- 13×13 有限地图、2:1 菱形投影、现有角色/树石素材；摇杆或 WASD 移动，可切换网格、全景/跟随镜头、回到起点。
+- 不读取或保存正式游戏进度，不含挖掘、答题和完整村庄；刷新重置体验位置。主游戏仍使用原根地址。
+- 31 组 Node 测试、严格 TypeScript、Creator 独立构建（36）与浏览器交互检查通过；含 8000 步边界/障碍检查、排序/遮挡、手机比例及正式存档哨兵值不变检查。未完成 iPhone 实机验证；四方向人物暂近似表达朝向。
+
+### 发布流程
 
 继续复用上述站点 ID，不要为每次迭代新建站点。用 Sites 读取站点当前状态和访问范围，
 获取同一站点的新源码写入凭据，通过 Sites 的 source helper 打开原工作目录，

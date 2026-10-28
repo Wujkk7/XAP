@@ -30,7 +30,7 @@ XAP：像素风、无限程序化生成的挖宝游戏（当前 XPAA：横屏、
 ## 怎么验证
 
 ```bash
-npm test        # 28 组核心、数据、资源与投影测试，必须全绿才能提交；也可 node test/run_tests.ts
+npm test        # 本实验分支 31 组核心、数据、资源与投影测试，必须全绿才能提交；也可 node test/run_tests.ts
 npm run demo    # ASCII 地图 + 示例题目，肉眼检查生成
 ```
 
