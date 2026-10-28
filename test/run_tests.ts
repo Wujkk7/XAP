@@ -22,6 +22,7 @@ import { obliqueProjection, occlusionAlpha } from "../cocos/assets/scripts/Obliq
 import { XPAA_ATLAS_SIZE, XPAA_REGIONS, WALK_CANVAS, walkFrame } from "../cocos/assets/data/resource-config/XPAAArt.ts";
 import { isoProject, isoUnproject, isoBlocked, IsometricWalk } from "../cocos/assets/core/Isometric.ts";
 import { ISOMETRIC_MAP } from "../cocos/assets/data/external-files/IsometricMap.ts";
+import { LayeredLab, makeLabLayer } from "../cocos/assets/core/LayeredLab.ts";
 
 let passed = 0;
 function check(name: string, fn: () => void) {
@@ -407,6 +408,69 @@ check("isometric finite map blocks water, trees and boundary during extended mov
   for (let i = 0; i < 8000; i++) {
     walk.tick(i % 37 === 0 ? 1 : 1 / 60, Math.sin(i / 111), Math.cos(i / 97));
     assert.ok(!isoBlocked(walk.x, walk.y), `blocked position ${walk.x},${walk.y}`);
+  }
+});
+
+check("layered experiment generates independent forest, roots and mineral grids", () => {
+  const a = makeLabLayer(0), b = makeLabLayer(1), c = makeLabLayer(2);
+  assert.equal(a.theme, 0); assert.equal(b.theme, 1); assert.equal(c.theme, 2);
+  assert.ok(b.tiles.flat().some(t => t.kind === "root")); assert.ok(c.tiles.flat().some(t => t.kind === "wall"));
+  assert.ok(c.tiles.flat().some(t => t.kind === "ore"));
+  a.tiles[7][6].damage = 0.8; assert.equal(b.tiles[7][6].damage, 0);
+  assert.deepEqual(makeLabLayer(8), makeLabLayer(8));
+});
+
+check("breaking opens a real channel and can repeatedly enter different layers", () => {
+  const lab = new LayeredLab();
+  for (let depth = 1; depth <= 5; depth++) {
+    lab.tick(0.05, 0, 0, false);
+    for (let i = 0; i < 100 && !lab.travel; i++) lab.tick(0.05, 0, 0, true);
+    assert.ok(lab.travel); assert.ok(lab.tile(6, 7, depth - 1)?.hole);
+    for (let i = 0; i < 30; i++) lab.tick(0.05, 0, 0, false);
+    assert.equal(lab.depth, depth); assert.equal(lab.maxDepth, depth);
+    assert.ok(!lab.collides(lab.walk.x, lab.walk.y));
+    assert.ok(lab.layer().entrances.some(p => p.x === 6 && p.y === 7));
+  }
+});
+
+check("returning through an entrance preserves lower passages and mined resources", () => {
+  const lab = new LayeredLab();
+  const breakFloor = () => {
+    lab.tick(0.05, 0, 0, false);
+    for (let i = 0; i < 100 && !lab.travel; i++) lab.tick(0.05, 0, 0, true);
+    for (let i = 0; i < 30; i++) lab.tick(0.05, 0, 0, false);
+  };
+  breakFloor(); breakFloor(); assert.equal(lab.depth, 2);
+  assert.ok(lab.ascend()); for (let i = 0; i < 30; i++) lab.tick(0.05, 0, 0, false);
+  assert.equal(lab.depth, 1); assert.ok(lab.tile(6, 7, 1)?.hole);
+  lab.tick(0.05, 0, 0, true); assert.ok(lab.travel);
+  for (let i = 0; i < 30; i++) lab.tick(0.05, 0, 0, false);
+  assert.equal(lab.depth, 2); assert.ok(!lab.collides(lab.walk.x, lab.walk.y));
+  lab.walk.x = 5.5; lab.walk.y = 5.5; assert.ok(lab.select(5, 4));
+  for (let i = 0; i < 100; i++) lab.tick(0.05, 0, 0, true);
+  assert.equal(lab.resources, 1); assert.equal(lab.tile(5, 4)?.kind, "floor");
+  assert.equal(lab.depth, 2); assert.equal(lab.travel, null);
+});
+
+check("holding a strike does not auto-chain descents and water cannot be broken", () => {
+  const lab = new LayeredLab();
+  for (let i = 0; i < 200; i++) lab.tick(0.05, 0, 0, true);
+  assert.equal(lab.depth, 1); assert.equal(lab.travel, null);
+  const wet = new LayeredLab(); wet.walk.x = 2.5; wet.walk.y = 3.5;
+  assert.ok(wet.select(2, 4)); for (let i = 0; i < 80; i++) wet.tick(0.05, 0, 0, true);
+  assert.equal(wet.tile(2, 4)?.hole, false); assert.equal(wet.depth, 0);
+});
+
+check("layered movement and strikes survive 1500 frames without embedding", () => {
+  let random = 42;
+  const next = () => { random = (Math.imul(random, 1664525) + 1013904223) >>> 0; return random / 4294967296; };
+  for (let depth = 0; depth < 3; depth++) {
+    const lab = new LayeredLab(); lab.depth = depth; lab.layer(depth);
+    for (let i = 0; i < 500; i++) {
+      lab.tick(1 / 60, next() * 2 - 1, next() * 2 - 1, i % 240 < 85);
+      assert.ok(!lab.collides(lab.walk.x, lab.walk.y), `embedded at layer ${lab.depth}, frame ${i}`);
+      assert.ok(lab.effects.length <= 32);
+    }
   }
 });
 

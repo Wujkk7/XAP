@@ -21,6 +21,7 @@ export function isoBlocked(x: number, y: number): boolean {
 }
 
 export class IsometricWalk {
+  isBlocked: (x: number, y: number) => boolean = isoBlocked;
   x: number = MAP.spawn.x;
   y: number = MAP.spawn.y;
   vx = 0;
@@ -44,8 +45,8 @@ export class IsometricWalk {
     const steps = Math.max(1, Math.ceil(Math.max(Math.abs(this.vx * dt), Math.abs(this.vy * dt)) / 0.08));
     for (let i = 0; i < steps; i++) {
       const nx = this.x + this.vx * dt / steps, ny = this.y + this.vy * dt / steps;
-      if (!isoBlocked(nx, this.y)) this.x = nx;
-      if (!isoBlocked(this.x, ny)) this.y = ny;
+      if (!this.isBlocked(nx, this.y)) this.x = nx;
+      if (!this.isBlocked(this.x, ny)) this.y = ny;
     }
     const now = isoProject(this.x, this.y);
     this.distance += Math.hypot(now.x - old.x, now.y - old.y) / W;
