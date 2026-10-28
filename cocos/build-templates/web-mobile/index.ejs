@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>地心寻词 · XPAA 横屏试玩</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#232b20">
+  <link rel="stylesheet" href="<%= cssUrl %>">
+  <style>
+    html,body { margin:0; background:#232b20; overscroll-behavior:none; touch-action:none; }
+    #rotate { display:none; }
+    @media (orientation:portrait) {
+      #rotate { position:fixed; inset:0; z-index:100; display:flex; flex-direction:column;
+        align-items:center; justify-content:center; padding:32px; color:#f4eed8; background:#232b20;
+        font:18px/1.7 -apple-system,"PingFang SC",sans-serif; text-align:center; }
+      #rotate strong { font-size:28px; margin-bottom:18px; }
+      #rotate p { max-width:20em; }
+    }
+  </style>
+</head>
+<body>
+  <div id="GameDiv" cc_exact_fit_screen="true"><div id="Cocos3dGameContainer">
+    <canvas id="GameCanvas" tabindex="0" aria-label="地心寻词游戏画面" oncontextmenu="event.preventDefault()"></canvas>
+  </div></div>
+  <div id="rotate" role="status"><strong>地心寻词</strong><p>把手机横过来，开始探索。</p><p>如果画面没有转动，请关闭 iPhone 的竖排方向锁定。</p></div>
+  <%- include(cocosTemplate, {}) %>
+</body>
+</html>

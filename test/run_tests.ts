@@ -19,6 +19,7 @@ import { hashCoords } from "../cocos/assets/core/rng.ts";
 import { ART_NAMES, ORE_ART } from "../cocos/assets/data/resource-config/ArtCatalog.ts";
 import { readFileSync } from "node:fs";
 import { obliqueProjection, occlusionAlpha } from "../cocos/assets/scripts/ObliqueProjection.ts";
+import { XPAA_ATLAS_SIZE, XPAA_REGIONS, WALK_CANVAS, walkFrame } from "../cocos/assets/data/resource-config/XPAAArt.ts";
 
 let passed = 0;
 function check(name: string, fn: () => void) {
@@ -351,6 +352,29 @@ check("foreground occlusion accounts for tall trees at low camera angles", () =>
   assert.equal(occlusionAlpha(0, 160, 90, 150, 30, 50), 1, "tree top below player stays opaque");
   assert.ok(occlusionAlpha(0, 60, 90, 150, 30, 50) < 0.4, "tree three rows ahead still fades");
   assert.ok(occlusionAlpha(0, 130, 90, 150, 30, 50) > occlusionAlpha(0, 60, 90, 150, 30, 50));
+});
+
+check("XPAA atlas regions fit the source image and walking canvas", () => {
+  const bytes = readFileSync(new URL("../cocos/assets/resources/xpaa/validation-board.png", import.meta.url));
+  assert.equal(bytes.toString("ascii", 1, 4), "PNG");
+  const dimensions = [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
+  assert.deepEqual(dimensions, XPAA_ATLAS_SIZE);
+  for (const [name, [x, y, w, h]] of Object.entries(XPAA_REGIONS)) {
+    assert.ok([x, y, w, h].every(Number.isInteger), name);
+    assert.ok(x >= 0 && y >= 0 && w > 0 && h > 0 && x + w <= dimensions[0] && y + h <= dimensions[1], name);
+    if (name.startsWith("walk_")) assert.ok(w <= WALK_CANVAS[0] && h <= WALK_CANVAS[1], name);
+  }
+});
+
+check("XPAA walking selects existing directional frames and returns to idle", () => {
+  for (const [x, y, direction] of [[0, 1, "down"], [-1, 0, "left"], [1, 0, "right"], [0, -1, "up"]] as const) {
+    for (let step = 0; step < 8; step++) {
+      const frame = walkFrame(x, y, (step + 0.5) * 0.22, true);
+      assert.equal(frame, `walk_${direction}_${step % 4}`);
+      assert.ok(XPAA_REGIONS[frame], frame);
+    }
+    assert.equal(walkFrame(x, y, 123, false), `walk_${direction}_0`);
+  }
 });
 
 console.log("\n" + passed + " test groups passed");

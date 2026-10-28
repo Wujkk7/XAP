@@ -1,6 +1,6 @@
 import {
   _decorator, Component, Node, Sprite, SpriteFrame, UITransform, UIOpacity, Graphics,
-  Label, Color, Layers, Mask, Texture2D, resources,
+  Label, Color, Layers, Mask, Texture2D, resources, Rect, Size, Vec2,
 } from "cc";
 import type { Expedition } from "../core/Expedition";
 import { hashCoords } from "../core/rng";
@@ -9,7 +9,8 @@ import type { GameTuning } from "../data/exposed-variables/GameTuning";
 import { VILLAGE } from "../data/external-files/Village";
 import { ART_NAMES, ORE_ART, STRATUM_TINT, DEBRIS_COLORS } from "../data/resource-config/ArtCatalog";
 import { UI_COLORS } from "../data/resource-config/TileStyles";
-import { obliqueProjection, occlusionAlpha } from "./ObliqueProjection";
+import { occlusionAlpha } from "./ObliqueProjection";
+import { XPAA_REGIONS, XPAA_ATLAS_SIZE, WALK_CANVAS, walkFrame } from "../data/resource-config/XPAAArt";
 
 const { ccclass } = _decorator;
 interface SpriteSlot { sprite: Sprite; transform: UITransform; opacity: UIOpacity; label: Label | null }
@@ -27,7 +28,8 @@ export class WorldView extends Component {
   private details!: Graphics;
   private overlay!: Graphics;
   private particles: Particle[] = [];
-  private stride = 0;
+  private walkDistance = 0;
+  private atlasFrames: SpriteFrame[] = [];
   private dustDistance = 0;
   private oldX = NaN;
   private oldY = NaN;
@@ -52,7 +54,26 @@ export class WorldView extends Component {
     }
     const missing = ART_NAMES.filter(name => !this.art.has(name));
     if (missing.length) throw new Error("美术资源缺失：" + missing.join("、"));
+    const texture = await new Promise<Texture2D>((resolve, reject) => {
+      resources.load("xpaa/validation-board/texture", Texture2D, (error, asset) => error ? reject(error) : resolve(asset));
+    });
+    if (texture.width !== XPAA_ATLAS_SIZE[0] || texture.height !== XPAA_ATLAS_SIZE[1]) throw new Error("XPAA 素材板尺寸不匹配");
+    texture.setFilters(Texture2D.Filter.NEAREST, Texture2D.Filter.NEAREST);
+    for (const [name, [x, y, w, h]] of Object.entries(XPAA_REGIONS)) {
+      const frame = new SpriteFrame();
+      frame.name = name; frame.texture = texture;
+      frame.rect = new Rect(x, y, w, h);
+      frame.originalSize = new Size(w, h);
+      if (name.startsWith("walk_")) {
+        frame.originalSize = new Size(...WALK_CANVAS);
+        frame.offset = new Vec2(0, (h - WALK_CANVAS[1]) / 2);
+      }
+      frame.packable = false;
+      this.art.set(name, frame); this.atlasFrames.push(frame);
+    }
   }
+
+  onDestroy(): void { for (const frame of this.atlasFrames) frame.destroy(); }
 
   private layer(name: string): Node {
     const node = new Node(name);
@@ -125,11 +146,10 @@ export class WorldView extends Component {
     const p = expedition.slot.position;
     this.elapsed += dt;
     const size = tuning.tileSize;
-    const projection = obliqueProjection(size, tuning.cameraPitch);
-    const row = projection.rowHeight;
+    const row = tuning.rowHeight;
     const artHeight = (art: string, width: number) => {
       const original = this.art.get(art)!.originalSize;
-      return width * original.height / original.width * projection.uprightScale;
+      return width * original.height / original.width;
     };
     const width = this.node.getComponent(UITransform)!.width;
     const height = this.node.getComponent(UITransform)!.height;
@@ -139,7 +159,7 @@ export class WorldView extends Component {
     this.oldX = p.x; this.oldY = p.y;
     if (this.oldDepth !== p.z) this.particles.length = 0;
     this.oldDepth = p.z;
-    if (Number.isFinite(moved) && moved < 1) { this.stride += moved / 0.38 * Math.PI; this.dustDistance += moved; }
+    if (Number.isFinite(moved) && moved < 1) { this.walkDistance += moved; this.dustDistance += moved; }
     if (this.dustDistance >= 0.38) { this.dustDistance = 0; this.spawn(p.x - 0.5, p.y - 0.1, p.z, "dirt", 1); }
     for (const effect of expedition.effects.splice(0)) {
       if (effect.z === p.z) this.spawn(effect.x, effect.y, effect.z, effect.type, effect.kind === "dig" ? 2 : 16);
@@ -152,12 +172,12 @@ export class WorldView extends Component {
     const radiusX = Math.ceil(width / size / 2) + 1;
     // Include the camera offset and tall sprites rooted just below the viewport.
     const radiusY = Math.ceil((height * Math.max(tuning.cameraAnchor, 1 - tuning.cameraAnchor)
-      + size * 4 * projection.uprightScale) / row) + 1;
+      + size * 4) / row) + 1;
     const tint = p.z === 0 ? "ffffff" : STRATUM_TINT[stratumAt(p.z).id];
     for (let y = Math.floor(cameraY) - radiusY; y <= Math.floor(cameraY) + radiusY; y++) {
       for (let x = Math.floor(cameraX) - radiusX; x <= Math.floor(cameraX) + radiusX; x++) {
         const tile = expedition.tileAt(x, y);
-        let art = p.z > 0 ? (stratumAt(p.z).id === 1 ? "tile_dirt" : "tile_rock") : "tile_grass";
+        let art = p.z > 0 ? (stratumAt(p.z).id === 1 ? "tile_dirt" : "tile_rock") : "xpaa_grass";
         if (p.z === 0) {
           const farm = VILLAGE.farm;
           if (x >= farm.minX && x <= farm.maxX && y >= farm.minY && y <= farm.maxY) art = "tile_plowed";
@@ -166,10 +186,9 @@ export class WorldView extends Component {
         }
         const floorTint = p.z > 0 && !tile.solid ? "746453" : tint;
         this.put(this.ground, groundCount++, this.groundLayer, art, sx(x + 0.5), sy(y + 1), size + 1, row + 1, floorTint);
-        if (p.z === 0 && art === "tile_grass") {
+        if (p.z === 0 && art === "xpaa_grass") {
           const variant = hashCoords(expedition.slot.game.seed, x, y, 0, 21) % 100;
-          const decal = tile.type === "flower" || variant >= 82 ? "tile_grass_flower" : variant >= 55 ? "tile_grass_tall" : "";
-          if (decal) this.put(this.ground, groundCount++, this.groundLayer, decal, sx(x + 0.72), sy(y + 1), size * 0.4, row * 0.4);
+          if (variant >= 86) this.put(this.ground, groundCount++, this.groundLayer, "xpaa_tuft", sx(x + 0.72), sy(y + 0.8), size * 0.32);
         }
         if (p.z > 0 && tile.solid && !ORE_ART[tile.type] && tile.type !== "chest" && !expedition.tileAt(x, y + 1).solid) {
           detail.fillColor = new Color(45, 31, 22, 90);
@@ -188,14 +207,15 @@ export class WorldView extends Component {
           detail.stroke();
         }
         if (tile.type === "tree") {
-          const variants = ["tree_oak", "tree_pine", "tree_apple", "tree_birch"];
+          const variants = ["xpaa_oak", "xpaa_pine"];
           const variant = hashCoords(expedition.slot.game.seed, x, y, 0, 22);
           detail.fillColor = new Color(22, 33, 20, 48);
-          detail.ellipse(sx(x + 0.65), sy(y + 0.8), size * 0.6, row * 0.2); detail.fill();
-          entities.push({ art: variants[variant % variants.length],
-            x: x + 0.5, y: y + 0.85, width: size * (1.65 + (variant % 5) * 0.06) });
+          detail.ellipse(sx(x + 0.55), sy(y + 0.5), size * 0.42, row * 0.12); detail.fill();
+          const treeArt = variants[variant % variants.length];
+          entities.push({ art: treeArt, x: x + 0.5, y: y + 0.5,
+            width: this.art.get(treeArt)!.originalSize.width * size / 216 });
         } else if (ORE_ART[tile.type]) {
-          entities.push({ art: ORE_ART[tile.type], x: x + 0.5, y: y + 0.85, width: size * 1.12,
+          entities.push({ art: tile.type === "surface_rock" ? "xpaa_stone" : ORE_ART[tile.type], x: x + 0.5, y: y + 0.5, width: size * 0.8,
             label: tile.type === "stubborn" ? "!" : "" });
         } else if (tile.type === "chest") {
           const xx = sx(x + 0.15), yy = sy(y + 0.77);
@@ -219,17 +239,15 @@ export class WorldView extends Component {
       }
     }
     const speed = Math.hypot(expedition.velocity.x, expedition.velocity.y);
-    const playerArt = expedition.facing.y < 0 ? "miner_back" : expedition.facing.x ? "miner_side" : "miner_front";
-    entities.push({ art: playerArt, x: p.x, y: p.y + 0.18 - (speed > 0.4 ? Math.sin(this.stride) * 0.035 : 0),
-      width: size * 0.62, flip: playerArt === "miner_side" && expedition.facing.x < 0,
-      angle: speed > 0.4 ? Math.sin(this.stride) * 3 : 0 });
+    const playerArt = walkFrame(expedition.facing.x, expedition.facing.y, this.walkDistance, speed > 0.4);
+    entities.push({ art: playerArt, x: p.x, y: p.y, width: size * 2 / 3 });
     entities.sort((a, b) => a.y - b.y);
     detail.fillColor = new Color(22, 18, 12, 65);
-    detail.ellipse(sx(p.x), sy(p.y + 0.18), size * 0.25, row * 0.1); detail.fill();
+    detail.ellipse(sx(p.x), sy(p.y), size * 0.2, row * 0.08); detail.fill();
     entities.forEach((entity, i) => {
       const h = artHeight(entity.art, entity.width);
       const alpha = entity.art === playerArt ? 1 : occlusionAlpha((entity.x - p.x) * size,
-        (entity.y - p.y - 0.18) * row, entity.width, h, size * 0.62, artHeight(playerArt, size * 0.62));
+        (entity.y - p.y) * row, entity.width, h, size * 2 / 3, artHeight(playerArt, size * 2 / 3));
       this.put(this.actors, i, this.actorLayer, entity.art, sx(entity.x), sy(entity.y),
         entity.width, h, "ffffff", alpha, entity.flip, entity.angle, entity.label);
     });

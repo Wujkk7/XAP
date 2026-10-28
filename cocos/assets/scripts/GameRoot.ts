@@ -13,10 +13,9 @@ import { MAX_FRAME_SECONDS } from "../data/constants/GameRules";
 import { PlayerStore } from "../data/player-data/PlayerStore";
 import { Expedition } from "../core/Expedition";
 import { WorldView } from "./WorldView";
-import { obliqueProjection } from "./ObliqueProjection";
 
 const { ccclass, requireComponent } = _decorator;
-const WIDTH = 720, HEIGHT = 1280;
+const WIDTH = 1280, HEIGHT = 720;
 
 @ccclass("GameRoot")
 @requireComponent(GameTuning)
@@ -34,6 +33,7 @@ export class GameRoot extends Component {
   private quizOptions: Label[] = [];
   private dexPanel!: Node;
   private dexText!: Label;
+  private dexTextRight!: Label;
   private dexTitle!: Label;
   private actionButton!: Label;
   private npcPanel!: Node;
@@ -61,15 +61,15 @@ export class GameRoot extends Component {
     input.on(Input.EventType.KEY_DOWN, this.keyDown, this);
     input.on(Input.EventType.KEY_UP, this.keyUp, this);
     game.on(Game.EVENT_HIDE, this.onHide, this);
+    view.on("canvas-resize", this.resetInput, this);
   }
 
   private async loadGame(): Promise<void> {
     try {
       const t = this.tuning;
-      if (![t.moveSpeed, t.acceleration, t.digSeconds, t.cameraFollow, t.tileSize].every(v => Number.isFinite(v) && v > 0)) {
+      if (![t.moveSpeed, t.acceleration, t.digSeconds, t.cameraFollow, t.tileSize, t.rowHeight].every(v => Number.isFinite(v) && v > 0)) {
         throw new Error("GameTuning 参数必须是正数");
       }
-      obliqueProjection(t.tileSize, t.cameraPitch);
       if (!Number.isFinite(t.cameraAnchor) || t.cameraAnchor < 0.4 || t.cameraAnchor > 0.65) {
         throw new Error("角色脚底位置必须在 0.4–0.65 之间");
       }
@@ -144,12 +144,12 @@ export class GameRoot extends Component {
     camera.clearColor = new Color().fromHEX(UI_COLORS.background);
     canvas.cameraComponent = camera;
     this.world = this.nodeAt("世界", this.root, 0, 0, WIDTH, HEIGHT).addComponent(WorldView);
-    const hudBacking = this.nodeAt("状态底色", this.root, 0, 560, 680, 124).addComponent(Graphics);
+    const hudBacking = this.nodeAt("状态底色", this.root, -270, 285, 640, 112).addComponent(Graphics);
     hudBacking.fillColor = new Color(24, 29, 21, 220);
-    hudBacking.roundRect(-340, -62, 680, 124, 10); hudBacking.fill();
-    this.hud = this.text(this.root, "进度", "加载中…", 0, 580, 652, 65, 24);
-    this.status = this.text(this.root, "提示", "", 0, 526, 652, 34, 20);
-    const joystick = this.nodeAt("摇杆", this.root, -230, -485, 180, 180);
+    hudBacking.roundRect(-320, -56, 640, 112, 10); hudBacking.fill();
+    this.hud = this.text(this.root, "进度", "加载中…", -270, 304, 612, 62, 23);
+    this.status = this.text(this.root, "提示", "", -270, 250, 612, 32, 20);
+    const joystick = this.nodeAt("摇杆", this.root, -490, -230, 180, 180);
     this.joystick = joystick.addComponent(Graphics);
     joystick.on(Node.EventType.TOUCH_START, this.moveJoystick, this);
     joystick.on(Node.EventType.TOUCH_MOVE, this.moveJoystick, this);
@@ -158,34 +158,35 @@ export class GameRoot extends Component {
     };
     joystick.on(Node.EventType.TOUCH_END, release);
     joystick.on(Node.EventType.TOUCH_CANCEL, release);
-    this.button(this.root, "挖掘 [空格]", -25, -455, 158, 90, () => {}, down => { this.digging = down; });
-    this.actionButton = this.button(this.root, "下挖 [E]", 180, -455, 158, 90, () => this.act());
-    this.button(this.root, "图鉴 [I]", -25, -570, 158, 86, () => this.toggleDex());
-    this.button(this.root, "上梯 [Q]", 180, -570, 158, 86, () => this.expedition?.ascend());
+    this.button(this.root, "挖掘 [空格]", 500, -160, 160, 96, () => {}, down => { this.digging = down; });
+    this.actionButton = this.button(this.root, "下挖 [E]", 500, -275, 160, 84, () => this.act());
+    this.button(this.root, "图鉴 [I]", 500, 300, 160, 70, () => this.toggleDex());
+    this.button(this.root, "上梯 [Q]", 310, -275, 160, 84, () => this.expedition?.ascend());
     this.quizPanel = this.panel("宝箱答题");
-    this.text(this.quizPanel, "标题", "一个单词，一把钥匙", 0, 440, 650, 65, 30);
-    this.quizWord = this.text(this.quizPanel, "单词", "", 0, 295, 650, 170, 42);
-    this.quizHint = this.text(this.quizPanel, "反馈", "选择这个单词的意思", 0, -325, 630, 125, 24);
+    this.text(this.quizPanel, "标题", "一个单词，一把钥匙", 0, 280, 1050, 65, 30);
+    this.quizWord = this.text(this.quizPanel, "单词", "", 0, 155, 1050, 140, 38);
+    this.quizHint = this.text(this.quizPanel, "反馈", "选择这个单词的意思", 0, -260, 1050, 110, 24);
     for (let i = 0; i < 4; i++) {
-      this.quizOptions.push(this.button(this.quizPanel, "选项 " + (i + 1), 0, 100 - i * 105, 550, 82, () => this.answer(i)));
+      this.quizOptions.push(this.button(this.quizPanel, "选项 " + (i + 1), i % 2 ? 270 : -270, -10 - Math.floor(i / 2) * 110, 490, 84, () => this.answer(i)));
     }
     this.dexPanel = this.panel("单词图鉴");
-    this.dexTitle = this.text(this.dexPanel, "标题", "单词图鉴", 0, 540, 650, 70, 32);
-    this.dexText = this.text(this.dexPanel, "词条", "", 0, 30, 630, 880, 24);
-    this.button(this.dexPanel, "返回 [I]", 0, -530, 250, 85, () => this.toggleDex());
+    this.dexTitle = this.text(this.dexPanel, "标题", "单词图鉴", 0, 280, 1050, 70, 32);
+    this.dexText = this.text(this.dexPanel, "词条左", "", -265, 0, 490, 420, 24);
+    this.dexTextRight = this.text(this.dexPanel, "词条右", "", 265, 0, 490, 420, 24);
+    this.button(this.dexPanel, "返回 [I]", 0, -280, 250, 80, () => this.toggleDex());
     this.npcPanel = this.nodeAt("梅婆婆对话", this.root, 0, 0, WIDTH, HEIGHT);
     this.npcPanel.addComponent(BlockInputEvents);
     const dialogueBackground = this.npcPanel.addComponent(Graphics);
     dialogueBackground.fillColor = new Color(18, 20, 15, 135);
     dialogueBackground.rect(-WIDTH / 2, -HEIGHT / 2, WIDTH, HEIGHT); dialogueBackground.fill();
     dialogueBackground.fillColor = new Color().fromHEX(UI_COLORS.panel);
-    dialogueBackground.roundRect(-330, -540, 660, 620, 12); dialogueBackground.fill();
+    dialogueBackground.roundRect(-550, -310, 1100, 420, 12); dialogueBackground.fill();
     dialogueBackground.strokeColor = new Color().fromHEX(UI_COLORS.accent);
     dialogueBackground.lineWidth = 2; dialogueBackground.stroke();
-    this.text(this.npcPanel, "名字", VILLAGE.npc.name, 0, 20, 600, 65, 32);
-    this.npcText = this.text(this.npcPanel, "双语台词", "", 0, -175, 600, 250, 28);
-    this.button(this.npcPanel, "再聊一句 [E]", -156, -440, 282, 85, () => this.advanceDialogue());
-    this.button(this.npcPanel, "继续探索 [Q]", 156, -440, 282, 85, () => this.closeDialogue());
+    this.text(this.npcPanel, "名字", VILLAGE.npc.name, 0, 60, 1000, 65, 32);
+    this.npcText = this.text(this.npcPanel, "双语台词", "", 0, -75, 1000, 170, 28);
+    this.button(this.npcPanel, "再聊一句 [E]", -260, -245, 420, 80, () => this.advanceDialogue());
+    this.button(this.npcPanel, "继续探索 [Q]", 260, -245, 420, 80, () => this.closeDialogue());
     this.npcPanel.active = false;
   }
 
@@ -215,7 +216,7 @@ export class GameRoot extends Component {
     const id = event.getID();
     if (id === null || (this.stick.id !== -1 && this.stick.id !== id)) return;
     const p = event.getUILocation();
-    const dx = p.x - WIDTH / 2 + 230, dy = p.y - HEIGHT / 2 + 485;
+    const dx = p.x - WIDTH / 2 - this.joystick.node.position.x, dy = p.y - HEIGHT / 2 - this.joystick.node.position.y;
     const length = Math.max(70, Math.hypot(dx, dy));
     this.stick = { x: dx / length, y: -dy / length, id };
     event.propagationStopped = true;
@@ -249,9 +250,11 @@ export class GameRoot extends Component {
     this.dexPanel.active = !this.dexPanel.active;
     const entries = g.slot.game.seenWords;
     this.dexTitle.string = "单词图鉴 · " + entries.length + "/" + WORDS_TIER1.length;
-    this.dexText.string = WORDS_TIER1.map(entry => entries.includes(entry.word)
+    const rows = WORDS_TIER1.map(entry => entries.includes(entry.word)
       ? entry.word + "  " + entry.meaning + " · " + (g.book.get(entry.word).status === "mastered" ? "已掌握" : "探索中")
-      : "? ? ?  ·  尚未发现").join("\n");
+      : "? ? ?  ·  尚未发现");
+    this.dexText.string = rows.slice(0, 10).join("\n");
+    this.dexTextRight.string = rows.slice(10).join("\n");
   }
 
   private answer(index: number): void {
@@ -267,6 +270,8 @@ export class GameRoot extends Component {
     const g = this.expedition;
     if (!g) return;
     const dt = Math.min(seconds, MAX_FRAME_SECONDS);
+    const frame = view.getFrameSize();
+    if (frame.height > frame.width) { this.resetInput(); return; }
     const pressed = (...codes: KeyCode[]) => codes.some(code => this.keys.has(code)) ? 1 : 0;
     if (!this.dexPanel.active && !this.npcPanel.active) {
       const x = this.stick.x + pressed(KeyCode.KEY_D, KeyCode.ARROW_RIGHT) - pressed(KeyCode.KEY_A, KeyCode.ARROW_LEFT);
@@ -322,6 +327,7 @@ export class GameRoot extends Component {
     input.off(Input.EventType.KEY_DOWN, this.keyDown, this);
     input.off(Input.EventType.KEY_UP, this.keyUp, this);
     game.off(Game.EVENT_HIDE, this.onHide, this);
+    view.off("canvas-resize", this.resetInput, this);
     this.persist();
   }
 }

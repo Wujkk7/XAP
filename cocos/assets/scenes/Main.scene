@@ -83,8 +83,8 @@
     "acceleration": 11,
     "digSeconds": 0.42,
     "cameraFollow": 8,
-    "tileSize": 48,
-    "cameraPitch": 25,
+    "tileSize": 72,
+    "rowHeight": 48,
     "cameraAnchor": 0.52,
     "worldContent": {
       "__uuid__": "9eb6d2db-1e6e-46e3-9fe5-2f5bad0bffd2",
