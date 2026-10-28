@@ -1,0 +1,6 @@
+export const ISO_TILE_WIDTH = 96;
+export const ISO_TILE_HEIGHT = 48;
+export const ISO_MOVE_PIXELS = 180;
+export const ISO_PLAYER_RADIUS = 0.22;
+export const ISO_OVERVIEW_ZOOM = 0.8;
+export const ISO_FOLLOW_ZOOM = 1.1;

@@ -20,6 +20,8 @@ import { ART_NAMES, ORE_ART } from "../cocos/assets/data/resource-config/ArtCata
 import { readFileSync } from "node:fs";
 import { obliqueProjection, occlusionAlpha } from "../cocos/assets/scripts/ObliqueProjection.ts";
 import { XPAA_ATLAS_SIZE, XPAA_REGIONS, WALK_CANVAS, walkFrame } from "../cocos/assets/data/resource-config/XPAAArt.ts";
+import { isoProject, isoUnproject, isoBlocked, IsometricWalk } from "../cocos/assets/core/Isometric.ts";
+import { ISOMETRIC_MAP } from "../cocos/assets/data/external-files/IsometricMap.ts";
 
 let passed = 0;
 function check(name: string, fn: () => void) {
@@ -374,6 +376,37 @@ check("XPAA walking selects existing directional frames and returns to idle", ()
       assert.ok(XPAA_REGIONS[frame], frame);
     }
     assert.equal(walkFrame(x, y, 123, false), `walk_${direction}_0`);
+  }
+});
+
+check("isometric projection is invertible and forms 2:1 diamonds", () => {
+  for (const [x, y] of [[0, 0], [1, 0], [0, 1], [6.5, 7.25], [13, 13], [-1.5, 3.1]]) {
+    const point = isoProject(x, y), restored = isoUnproject(point.x, point.y);
+    assert.ok(Math.abs(restored.x - x) < 1e-10 && Math.abs(restored.y - y) < 1e-10);
+  }
+  assert.equal(isoProject(1, 0).x, 48); assert.equal(isoProject(0, 1).x, -48);
+  assert.equal(isoProject(1, 0).y, -24); assert.equal(isoProject(0, 1).y, -24);
+});
+
+check("isometric controls follow screen directions and reset without touching saves", () => {
+  const walk = new IsometricWalk(); walk.x = walk.y = 6.5;
+  const before = isoProject(walk.x, walk.y);
+  for (let i = 0; i < 10; i++) walk.tick(1 / 60, 1, 0);
+  const after = isoProject(walk.x, walk.y);
+  assert.ok(after.x > before.x); assert.ok(Math.abs(after.y - before.y) < 1e-8);
+  walk.reset(); assert.equal(walk.x, ISOMETRIC_MAP.spawn.x); assert.equal(walk.y, ISOMETRIC_MAP.spawn.y);
+  assert.equal(walk.vx, 0); assert.equal(walk.vy, 0); assert.equal(walk.distance, 0);
+});
+
+check("isometric finite map blocks water, trees and boundary during extended movement", () => {
+  assert.ok(!isoBlocked(ISOMETRIC_MAP.spawn.x, ISOMETRIC_MAP.spawn.y));
+  for (const p of ISOMETRIC_MAP.props) assert.ok(isoBlocked(p.x + 0.5, p.y + 0.5));
+  for (const [x, y] of ISOMETRIC_MAP.water) assert.ok(isoBlocked(x + 0.5, y + 0.5));
+  assert.ok(isoBlocked(-0.1, 6)); assert.ok(isoBlocked(13.1, 6));
+  const walk = new IsometricWalk();
+  for (let i = 0; i < 8000; i++) {
+    walk.tick(i % 37 === 0 ? 1 : 1 / 60, Math.sin(i / 111), Math.cos(i / 97));
+    assert.ok(!isoBlocked(walk.x, walk.y), `blocked position ${walk.x},${walk.y}`);
   }
 });
 

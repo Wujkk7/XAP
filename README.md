@@ -6,6 +6,12 @@ Safari 私人远程试玩与版本记录见 [PREVIEW.md](PREVIEW.md)。
 
 开发顺序、验收标准与勾选进度见 [开发计划 PLAN.md](PLAN.md)。
 
+## 等距菱形视角体验版（仅本分支）
+
+`codex/isometric-view-lab` 为独立视角实验，正式 main 保持原横屏版本。在 Creator 打开 `cocos/assets/scenes/Isometric.scene` 预览：13×13 有限地图、2:1 菱形地面，摇杆/WASD 移动，按钮切换网格、全景/跟随镜头和回到起点；桌面也可按 G/F/R。本场景不读写玩家存档，刷新回到起点，不包含完整挖掘或学习玩法。现有四方向人物与树石只用于视角验证。
+
+构建选择 `Isometric` 启动场景，Web Mobile 输出名设为 `isometric`；构建后运行 `node tools/check_isometric.mjs` 验证移动、排序/遮挡、手机布局及存档隔离。独立远程路径为原私人试玩站点的 `/isometric/`，发布结果见 PREVIEW.md。
+
 ## Cocos Creator 预览
 
 1. 用 **Creator 3.8.8** 打开 `cocos/`。

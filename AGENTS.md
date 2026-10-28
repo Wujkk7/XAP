@@ -36,6 +36,14 @@ npm run demo    # ASCII 地图 + 示例题目，肉眼检查生成
 
 ## 当前进度（2026-10-27）
 
+### 等距视角实验分支（2026-10-28，当前分支限定）
+
+- `codex/isometric-view-lab`，从 main `0408888` 分出；独立 Isometric.scene，不合并或替换主场景。
+- core/Isometric.ts 为纯 TS 投影、逆变换和有限地图移动；地图配置在 external-files/IsometricMap.ts，参数在 constants/IsometricRules.ts。
+- IsometricDemo 用现有 XPAA 图集，地面旋转后按 2:1 投影，直立物件保持比例，按 x+y 排序；仅含走动、碰撞、网格/镜头切换，不接入存档。
+- 31 组测试、严格 TS、独立 Creator Web Mobile 构建（36）、tools/check_isometric.mjs 通过；覆盖屏幕方向一致的输入、8000 步有限地图碰撞、排序/渐隐、重置、手机比例、竖屏暂停、刷新不改正式存档。
+- 若发布，复用既有私人站点，只增加 dist/isometric，根路径阶段一试玩保持原产物。iPhone 真机尚未验证，现有四方向素材不代表新画了八方向等距素材。
+
 ### 阶段一轻量 UI（2026-10-28，覆盖下方归档时的未验证状态）
 
 - 用户确认轻量 HUD：深度/金币常驻，背包和图鉴点击展开；图鉴 8 词一页。新增背包面板、按钮触点独立处理与按下/禁用反馈，短消息 6 秒后隐藏，存档错误持续提示。
