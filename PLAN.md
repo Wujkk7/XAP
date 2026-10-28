@@ -7,7 +7,7 @@
 
 ## 当前基线
 
-- 分支实验：`codex/isometric-view-lab` 已由单层场景扩展为多层世界。36 组测试（含 1500 帧多层移动/破坏）、严格 TS、最终 Creator 构建、三层真实触点流程和原视角回归全部通过。发布记录见 PREVIEW.md，iPhone 待验收。
+- 分支实验：`codex/isometric-view-lab` 已由单层场景扩展为多层世界，源码 `af37b8d` 已推送，/isometric/ 部署成功。36 组测试（含 1500 帧多层移动/破坏）、严格 TS、最终 Creator 构建、三层真实触点流程和原视角回归全部通过。下一步是真机节奏验收和遗迹层最小事件；发布记录见 PREVIEW.md。
 
 - 当前代码：`main` 的阶段一 UI 提交 `8803d8b` 已同步 GitHub；`XPAA` 保留之前的 `d3a4aa2` 开发快照。
 - 审查时 GitHub `main`：`6beda4c`。

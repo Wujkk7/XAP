@@ -2,6 +2,8 @@
 
 这是现有 Cocos 等距实验场景的扩展，分支为 `codex/isometric-view-lab`。项目未重建，正式游戏和正式存档独立保留。
 
+已发布私人试玩：[破土向下](https://xap-digging-preview-wujkk7.sugaryharp130.chatgpt.site/isometric/)。源码提交 `af37b8d`，发布详情见 PREVIEW.md。
+
 ## 运行与操作
 
 1. Creator 3.8.8 打开仓库的 `cocos/`。
@@ -40,6 +42,10 @@
 | `cocos/assets/scripts/IsometricDemo.ts` | 当前与下一层节点、剖面/裂纹/碎屑、输入、镜头、合成音效 |
 | `test/run_tests.ts` | 独立地图、重复突破、往返、资源保留、1500 帧移动与破坏检查 |
 | `tools/check_layered_lab.mjs` | 构建产物的真实触屏流程和截图检查 |
+| `tools/check_isometric.mjs` | 原移动/视角回归，适配入口按钮位置并检查控制台错误 |
+| `DESIGN.md`、`README.md`、`AGENTS.md`、`PLAN.md`、`PREVIEW.md` | 设计、运行方法、交接、阶段进度和实际发布记录 |
+
+新增 LayeredLab.ts 与 IsometricLayers.ts 各附 Creator `.meta` 资源标识文件；原 Isometric 场景继续复用。
 
 ## 下一步
 
