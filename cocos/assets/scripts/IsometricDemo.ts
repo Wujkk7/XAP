@@ -12,6 +12,10 @@ import { ISO_TILE_WIDTH as W, ISO_TILE_HEIGHT as H, ISO_OVERVIEW_ZOOM, ISO_FOLLO
 import { XPAA_REGIONS, WALK_CANVAS, walkFrame } from "../data/resource-config/XPAAArt";
 import { UI_COLORS as C } from "../data/resource-config/TileStyles";
 import { occlusionAlpha } from "./ObliqueProjection";
+import { WordPassages } from "../core/WordPassages";
+import { WordPassageUI } from "./WordPassageUI";
+import { LAB_STORAGE_KEY } from "../data/player-data/LabSave";
+import { LAB_WORD_RULES } from "../data/constants/WordPassageRules";
 
 const { ccclass } = _decorator;
 interface Actor { x: number; y: number; width: number; node: Node; sprite?: Sprite; opacity: UIOpacity }
@@ -21,6 +25,18 @@ interface Fragment { x: number; y: number; depth: number; vx: number; vy: number
 @ccclass("IsometricDemo")
 export class IsometricDemo extends Component {
   private lab = new LayeredLab();
+  private words = new WordPassages(this.lab);
+  private wordUI!: WordPassageUI;
+  private interactButton!: Label;
+  private wordMarks!: Graphics;
+  private weapon!: Label;
+  private swingAge = 1;
+  private wordDamage = 0;
+  private finishSwing: (() => void) | null = null;
+  private saveClock = 0;
+  private saveError = "";
+  private preserveBadSave = false;
+  private loot: { label: Label; age: number; letter: string }[] = [];
   private walk = this.lab.walk;
   private frames = new Map<string, SpriteFrame>();
   private world!: Node;
@@ -61,6 +77,8 @@ export class IsometricDemo extends Component {
   private lastDepth = 0;
 
   onLoad(): void {
+    try { const raw = sys.localStorage.getItem(LAB_STORAGE_KEY); if (raw) this.words.restore(raw); }
+    catch (error) { this.preserveBadSave = true; this.saveError = "实验存档读取失败，原档已保留；当前游玩不会覆盖。"; console.warn(error); }
     this.node.layer = Layers.Enum.UI_2D;
     profiler.hideStats(); view.setDesignResolutionSize(1280, 720, ResolutionPolicy.SHOW_ALL);
     if (sys.isBrowser && typeof ResizeObserver !== "undefined") {
@@ -114,22 +132,22 @@ export class IsometricDemo extends Component {
     if (hold) label.color = this.color(C.darkInk); return label;
   }
   private buildUI(): void {
-    const plate = this.make("标题底色", this.node, -355, 286, 460, 94).addComponent(Graphics);
+    const plate = this.make("标题底色", this.node, -405, 286, 370, 94).addComponent(Graphics);
     plate.fillColor = this.color(C.background); plate.rect(-230, -47, 460, 94); plate.fill();
-    this.titleText = this.text(this.node, "标题", "破土向下 · 阳光森林", -355, 306, 430, 30);
-    this.subtitleText = this.text(this.node, "说明", "最深 1 层 · 矿晶 0", -355, 271, 430, 21); this.subtitleText.color = this.color(C.muted);
+    this.titleText = this.text(this.node, "标题", "破土向下 · 阳光森林", -405, 306, 350, 30);
+    this.subtitleText = this.text(this.node, "说明", "最深 1 层 · 矿晶 0", -405, 271, 350, 21); this.subtitleText.color = this.color(C.muted);
     this.gridButton = this.button("网格 · 开", 295, 286, () => this.toggleGrid());
     this.cameraButton = this.button("镜头 · 全景", 505, 286, () => this.toggleCamera());
     this.button("回到入口", 295, -281, () => { this.lab.returnToEntry(); this.resetInput(); });
     this.button("返回上层", 295, -177, () => { this.lab.ascend(); this.resetInput(); });
-    this.impactButton = this.button("砸穿地面\n长按", 505, -239, () => {}, down => {
+    this.impactButton = this.button("敲击地面", 505, -239, () => { if (!this.wordUI.active) this.lab.tapStrike(); }, down => {
       this.striking = down; if (down) this.playSound("hit");
     }, 170);
     const audio = this.button("声音 · 开", 85, 286, () => { this.sound = !this.sound; audio.string = "声音 · " + (this.sound ? "开" : "关"); });
     this.stick = this.make("摇杆", this.node, -495, -235, 192, 192).addComponent(Graphics);
     const move = (e: EventTouch) => {
       e.propagationStopped = true;
-      if (!this.ready || this.lab.travel || view.getFrameSize().height > view.getFrameSize().width) return;
+      if (!this.ready || this.lab.travel || this.wordUI?.active || view.getFrameSize().height > view.getFrameSize().width) return;
       if (this.joystick.id !== -1 && this.joystick.id !== e.getID()) return;
       const p = e.getUILocation(), x = p.x - 640 + 495, y = p.y - 360 + 235, d = Math.max(65, Math.hypot(x, y));
       this.joystick = { x: x / d, y: y / d, id: e.getID()! };
@@ -141,6 +159,35 @@ export class IsometricDemo extends Component {
     this.readout = this.text(this.node, "位置", "正在装入试验场…", 0, -315, 520, 23);
     this.notice = this.text(this.node, "发现提示", "", 0, 192, 880, 27);
     this.notice.enableOutline = true; this.notice.outlineWidth = 3; this.notice.outlineColor = this.color(C.background);
+    this.button("字母袋", -125, 286, () => this.openWords("bag"));
+    this.interactButton = this.button("探索互动", 505, -105, () => this.interact(), undefined, 64);
+    this.wordUI = new WordPassageUI(this.node, this.words, () => { this.lab.layer().revision++; this.saveLab(); }, (letters, finish) => {
+      if (letters.startsWith("+")) { this.showLetterLoot(letters.slice(1)); return; }
+      this.weapon.string = letters; this.swingAge = 0; this.finishSwing = finish ?? null; this.playSound("hit");
+      const p = this.words.services[0]; this.lab.target = { x: p.x, y: p.y };
+    }, () => { const p = this.words.services[0]; if (!this.words.room.opened) this.lab.tile(p.x,p.y)!.damage = 0; this.resetInput(); });
+  }
+  private openWords(mode: string, index = 0): void {
+    if (!this.ready || this.lab.travel) return;
+    this.resetInput(); this.wordUI.open(mode, index);
+  }
+  private interact(): void {
+    const p = this.words.nearby(); if (!p || this.wordUI.active) return;
+    if (p.id === "seal") this.openWords("seal");
+    else if (p.id.startsWith("chest")) this.openWords("chest", Number(p.id.slice(-1)));
+    else this.openWords(p.id);
+  }
+  private saveLab(): void {
+    if (this.preserveBadSave || this.lab.travel || !this.ready) return;
+    try { sys.localStorage.setItem(LAB_STORAGE_KEY, this.words.snapshot()); this.saveError = ""; }
+    catch { this.saveError = "实验进度保存失败，请检查浏览器存储空间；旧存档仍保留。"; }
+  }
+  private showLetterLoot(letters: string): void {
+    for (let i = 0; i < letters.length; i++) {
+      const label = this.text(this.node, "字母入袋", letters[i], 0, 80, 70, 42);
+      label.color = this.color("JQXZKV".includes(letters[i]) ? "f4c577" : "f1e7c7");
+      this.loot.push({ label, age: -i * 0.13, letter: letters[i] });
+    }
   }
 
   private async load(): Promise<void> {
@@ -157,11 +204,14 @@ export class IsometricDemo extends Component {
       const original = await new Promise<SpriteFrame[]>((resolve, reject) => resources.loadDir("art", SpriteFrame, (error, assets) => error ? reject(error) : resolve(assets)));
       if (!this.isValid) return;
       for (const frame of original) { frame.texture.setFilters(Texture2D.Filter.NEAREST, Texture2D.Filter.NEAREST); this.frames.set(frame.name, frame); }
-      this.ensureView(0); this.player = this.actor(this.layerViews.get(0)!.actorsNode, "walk_down_0", this.walk.x, this.walk.y, 48);
+      this.ensureView(this.lab.depth); this.player = this.actor(this.layerViews.get(this.lab.depth)!.actorsNode, "walk_down_0", this.walk.x, this.walk.y, 48);
       this.marker = this.make("裂纹与碎屑", this.world).addComponent(Graphics);
       this.pickup = this.text(this.world, "拾取提示", "矿晶 +1", 0, 0, 220, 25); this.pickup.color = this.color(C.accent);
+      this.wordMarks = this.make("探索标识", this.world).addComponent(Graphics);
+      this.weapon = this.text(this.world, "字母武器", "", 0, 0, 300, 58); this.weapon.color = this.color("f9d484");
+      this.weapon.enableOutline = true; this.weapon.outlineColor = this.color("27392f"); this.weapon.outlineWidth = 3;
       this.node.on(Node.EventType.TOUCH_END, (e: EventTouch) => {
-        if (this.lab.travel) return;
+        if (this.lab.travel || this.wordUI.active) return;
         const p = e.getUILocation(), zoom = this.world.scale.x;
         const pointer = { x: (p.x - 640 - this.world.position.x) / zoom, y: (p.y - 360 - this.world.position.y) / zoom + this.lab.depth * LAB_LAYER_GAP };
         // 大精灵透明矩形不能截走近处矿晶的点击；在可敲击范围内按可见物体中心选择。
@@ -281,6 +331,20 @@ export class IsometricDemo extends Component {
         actors.push({ node: obstacle, x: x + 0.5, y: y + 0.5, width: W, opacity: obstacle.addComponent(UIOpacity) });
       }
     }
+    if (depth === this.lab.depth) for (const p of this.words.services) {
+      if (!this.words.serviceAt(p.x,p.y)) continue;
+      if (p.id === "npc") {
+        const a = this.actor(actorsNode,"tom_front",p.x+.5,p.y+.5,40); actors.push(a); continue;
+      }
+      const at = isoProject(p.x+.5,p.y+.5), block=this.make(p.title,actorsNode,at.x,at.y,W,70), g=block.addComponent(Graphics);
+      block.getComponent(UITransform)!.setAnchorPoint(.5,0);
+      const hue=p.id==='seal'?'b69865':p.id==='clue'?'7eabb5':'ba945d';
+      this.polygon(g,[{x:-26,y:0},{x:0,y:-13},{x:0,y:18},{x:-26,y:31}],this.shade(hue,.65));
+      this.polygon(g,[{x:0,y:-13},{x:26,y:0},{x:26,y:31},{x:0,y:18}],this.shade(hue,.8));
+      this.polygon(g,[{x:-26,y:31},{x:0,y:44},{x:26,y:31},{x:0,y:18}],hue);
+      this.text(block,"标识",p.id==='seal'?'◇':p.id==='clue'?'碑':'箱',0,32,50,23);
+      actors.push({node:block,x:p.x+.5,y:p.y+.5,width:W,opacity:block.addComponent(UIOpacity)});
+    }
     const view = { node, actorsNode, actors, grid, revision: layer.revision, floors }; this.layerViews.set(depth, view); return view;
   }
 
@@ -303,15 +367,27 @@ export class IsometricDemo extends Component {
   private toggleGrid(): void { this.grid = !this.grid; this.gridButton.string = "网格 · " + (this.grid ? "开" : "关"); }
   private toggleCamera(): void { this.follow = !this.follow; this.cameraButton.string = "镜头 · " + (this.follow ? "跟随" : "全景"); }
   private keyDown(e: EventKeyboard): void {
+    if (this.wordUI?.active) {
+      if (this.keys.has(e.keyCode)) return;
+      this.keys.add(e.keyCode);
+      if (e.keyCode >= KeyCode.KEY_A && e.keyCode <= KeyCode.KEY_Z) this.wordUI.type(String.fromCharCode(e.keyCode));
+      if (e.keyCode === KeyCode.BACKSPACE) this.wordUI.backspace();
+      if (e.keyCode === KeyCode.ENTER) this.wordUI.submit();
+      if (e.keyCode === KeyCode.ESCAPE) this.wordUI.close();
+      return;
+    }
     if (this.keys.has(e.keyCode) || view.getFrameSize().height > view.getFrameSize().width) return;
     this.keys.add(e.keyCode);
     if (e.keyCode === KeyCode.KEY_G) this.toggleGrid(); if (e.keyCode === KeyCode.KEY_F) this.toggleCamera();
     if (e.keyCode === KeyCode.SPACE) { this.striking = true; this.playSound("hit"); }
     if (e.keyCode === KeyCode.KEY_Q) { this.lab.ascend(); this.resetInput(); }
     if (e.keyCode === KeyCode.KEY_R) { this.lab.returnToEntry(); this.resetInput(); }
+    if (e.keyCode === KeyCode.KEY_E) this.interact();
+    if (e.keyCode === KeyCode.KEY_B) this.openWords("bag");
   }
   private keyUp(e: EventKeyboard): void { this.keys.delete(e.keyCode); if (e.keyCode === KeyCode.SPACE) this.striking = false; }
   private resetInput(): void {
+    this.saveLab();
     this.keys.clear(); this.striking = false; this.joystick = { x: 0, y: 0, id: -1 }; this.walk.stop();
     for (const reset of this.buttonResets) reset();
   }
@@ -345,6 +421,8 @@ export class IsometricDemo extends Component {
   private drawEffects(dt: number): void {
     const g = this.marker; g.clear();
     const target = this.lab.selected(), tile = this.lab.tile(target.x, target.y)!;
+    this.wordDamage += (tile.damage-this.wordDamage)*(1-Math.exp(-14*dt));
+    const damage = this.wordUI.active ? this.wordDamage : tile.damage;
     const at = isoProject(target.x + 0.5, target.y + 0.5), offset = 0;
     if (this.lab.depth > 0) {
       const foot = isoProject(this.walk.x, this.walk.y), theme = LAB_THEMES[this.lab.layer().theme];
@@ -354,19 +432,21 @@ export class IsometricDemo extends Component {
     }
     g.strokeColor = this.color(C.accent); g.lineWidth = 2;
     this.polygon(g, [isoProject(target.x, target.y), isoProject(target.x + 1, target.y), isoProject(target.x + 1, target.y + 1), isoProject(target.x, target.y + 1)].map(p => ({ x: p.x, y: p.y + offset })));
-    if (tile.damage > 0 && !this.lab.travel) {
-      const phase = Math.ceil(tile.damage * 3), cx = at.x, cy = at.y + offset;
-      g.strokeColor = this.color("201d19"); g.lineWidth = 2 + tile.damage;
+    if (damage > .01 && !this.lab.travel) {
+      const phase = Math.ceil(damage * 3), cx = at.x, cy = at.y + offset;
+      g.strokeColor = this.color("201d19"); g.lineWidth = 2 + damage;
       g.moveTo(cx - 15, cy + 7); g.lineTo(cx - 3, cy); g.lineTo(cx + 6, cy - 8);
       if (phase >= 2) { g.moveTo(cx - 3, cy); g.lineTo(cx + 15, cy + 5); g.lineTo(cx + 28, cy + 4); }
       if (phase >= 3) { g.moveTo(cx - 15, cy + 7); g.lineTo(cx - 31, cy + 4); g.moveTo(cx + 6, cy - 8); g.lineTo(cx + 22, cy - 12); } g.stroke();
       const floor = this.layerViews.get(this.lab.depth)?.floors.get(target.x + "," + target.y);
       if (floor) floor.setPosition(at.x + Math.sin(this.elapsed * 100) * (this.striking ? 1.2 : 0), at.y);
       // 镐柄与镐头围绕角色手部挥动；角色贴图本身不变形。
+      if (!this.wordUI.active) {
       const player = isoProject(this.walk.x, this.walk.y), swing = Math.sin(this.elapsed * 18), dx = at.x - player.x;
       const hx = player.x + (dx >= 0 ? 18 : -18), hy = player.y + offset + 22;
       g.strokeColor = this.color("be9b65"); g.lineWidth = 4; g.moveTo(hx, hy); g.lineTo(hx + swing * 21, hy + 18 - swing * 8); g.stroke();
       g.strokeColor = this.color("d4dbda"); g.moveTo(hx + swing * 21 - 10, hy + 16 - swing * 8); g.lineTo(hx + swing * 21 + 9, hy + 24 - swing * 8); g.stroke();
+      }
     }
     this.sinks = this.sinks.filter(s => s.age < 0.4);
     for (const s of this.sinks) {
@@ -390,7 +470,18 @@ export class IsometricDemo extends Component {
     const dt = Math.min(seconds, 0.05), pressed = (...keys: KeyCode[]) => keys.some(k => this.keys.has(k)) ? 1 : 0;
     this.elapsed += dt; this.shake = Math.max(0, this.shake - dt);
     const before = this.walk.distance;
-    this.lab.tick(dt, this.joystick.x + pressed(KeyCode.KEY_D, KeyCode.ARROW_RIGHT) - pressed(KeyCode.KEY_A, KeyCode.ARROW_LEFT), this.joystick.y + pressed(KeyCode.KEY_W, KeyCode.ARROW_UP) - pressed(KeyCode.KEY_S, KeyCode.ARROW_DOWN), this.striking);
+    const editing = this.wordUI.active;
+    this.lab.tick(dt, editing ? 0 : this.joystick.x + pressed(KeyCode.KEY_D, KeyCode.ARROW_RIGHT) - pressed(KeyCode.KEY_A, KeyCode.ARROW_LEFT), editing ? 0 : this.joystick.y + pressed(KeyCode.KEY_W, KeyCode.ARROW_UP) - pressed(KeyCode.KEY_S, KeyCode.ARROW_DOWN), !editing && this.striking);
+    this.words.prepare();
+    this.saveClock += dt; if (this.saveClock >= 1) { this.saveClock = 0; this.saveLab(); }
+    this.swingAge += dt;
+    if (this.finishSwing && this.swingAge >= LAB_WORD_RULES.finishSeconds) { const finish = this.finishSwing; this.finishSwing = null; finish(); }
+    for (const item of this.loot) {
+      item.age += dt; item.label.node.active = item.age >= 0 && item.age < .8;
+      const t = Math.max(0,Math.min(1,item.age/.8)); item.label.node.setPosition(-125*t,80+206*t*t);
+    }
+    for (const item of this.loot.filter(l => l.age >= .8)) item.label.node.destroy();
+    this.loot = this.loot.filter(l => l.age < .8);
     for (const event of this.lab.effects.splice(0)) this.effect(event);
     if (this.lastDepth !== this.lab.depth) { this.lastDepth = this.lab.depth; this.resetInput(); }
     const theme = LAB_THEMES[this.lab.layer().theme], travel = this.lab.travel;
@@ -409,7 +500,8 @@ export class IsometricDemo extends Component {
     this.cameraY += ((this.follow ? this.walk.y : MAP.size / 2) - this.cameraY) * blend;
     const camera = isoProject(this.cameraX, this.cameraY), zoom = travel ? 0.72 : this.follow ? ISO_FOLLOW_ZOOM : ISO_OVERVIEW_ZOOM;
     const shake = this.shake > 0 ? Math.sin(this.elapsed * 92) * 2.2 * this.shake / 0.13 : 0;
-    this.world.setScale(zoom, zoom, 1); this.world.setPosition(-camera.x * zoom + shake, (-camera.y + viewDepth * LAB_LAYER_GAP) * zoom - 15);
+    const focus = editing ? isoProject(this.walk.x,this.walk.y) : camera;
+    this.world.setScale(zoom, zoom, 1); this.world.setPosition(-focus.x * zoom + shake, (-focus.y + viewDepth * LAB_LAYER_GAP) * zoom + (editing ? 145 : -15));
     const p = isoProject(this.walk.x, this.walk.y), art = walkFrame(this.walk.facing.x, this.walk.facing.y, this.walk.distance, this.walk.distance > before + 0.0001);
     const active = this.layerViews.get(this.lab.depth)!;
     this.player.node.parent = travel ? this.world : active.actorsNode;
@@ -420,26 +512,43 @@ export class IsometricDemo extends Component {
       if (!travel || actor !== this.player) actor.node.setSiblingIndex(i);
       const foot = isoProject(actor.x, actor.y), h = actor.node.getComponent(UITransform)!.height;
       actor.opacity.opacity = actor === this.player ? 255 : Math.round(255 * occlusionAlpha(foot.x - p.x, p.y - foot.y, actor.width, h, 48, 69));
+      if (actor !== this.player && this.wordUI.mode === "seal" && actor.x === this.words.services[0].x+.5 && actor.y === this.words.services[0].y+.5)
+        actor.node.setPosition(foot.x+(this.swingAge<.2?Math.sin(this.swingAge*100)*2:0),foot.y);
     });
     Array.from(this.layerViews.entries()).sort((a, b) => b[0] - a[0]).forEach(([, v], i) => { v.node.setSiblingIndex(i); v.grid.node.active = this.grid; });
     this.marker.node.setSiblingIndex(this.world.children.length - 1); this.pickup.node.setSiblingIndex(this.world.children.length - 1);
     if (travel) this.player.node.setSiblingIndex(this.world.children.length - 1);
     this.marker.node.setPosition(0, -this.lab.depth * LAB_LAYER_GAP);
     this.drawEffects(dt);
+    this.weapon.node.active = this.swingAge < (this.finishSwing ? LAB_WORD_RULES.finishSeconds : .26);
+    if (this.weapon.node.active) {
+      const phase = Math.min(1,this.swingAge/(this.finishSwing ? LAB_WORD_RULES.finishSeconds : .26));
+      this.weapon.node.setPosition(p.x + 25 + Math.sin(phase*Math.PI)*28,p.y-this.lab.depth*LAB_LAYER_GAP+38+Math.sin(phase*Math.PI)*44);
+      this.weapon.node.setRotationFromEuler(0,0,65-phase*125); this.weapon.node.setScale(this.finishSwing ? 1.25 : 1,1,1);
+      this.weapon.node.setSiblingIndex(this.world.children.length-1);
+    }
+    this.wordMarks.node.setPosition(0,-this.lab.depth*LAB_LAYER_GAP);this.wordMarks.clear();
+    this.wordMarks.strokeColor=this.color("e2bf72");this.wordMarks.lineWidth=2;
+    const nearby=this.words.nearby();
+    if(nearby){this.diamond(this.wordMarks,nearby.x,nearby.y);this.wordMarks.node.setSiblingIndex(this.world.children.length-1);}
+    this.interactButton.string=nearby?nearby.title+" · 互动":"探索互动 · E";
+    this.interactButton.color=this.color(nearby?C.ink:C.muted);
     this.titleText.string = "第 " + (this.lab.depth + 1) + " 层 · " + theme.name;
-    this.subtitleText.string = "最深 " + (this.lab.maxDepth + 1) + " 层 · 矿晶 " + this.lab.resources;
+    this.subtitleText.string = "最深 " + (this.lab.maxDepth + 1) + " 层 · 材料 " + this.lab.resources;
     const selected = this.lab.selected(), targetTile = this.lab.tile(selected.x, selected.y)!, damage = targetTile.damage;
     const action = targetTile.kind === "ore" ? "敲开矿晶" : ["root", "tree", "wall", "rock"].includes(targetTile.kind) ? "敲开障碍" : "砸穿地面";
-    this.impactButton.string = travel ? (travel.to > travel.from ? "下潜中…" : "返回中…") : action + "\n长按 / 空格";
-    this.readout.string = damage > 0 ? "地块裂开 " + Math.round(damage * 100) + "% · 松手可暂停" : theme.objective;
+    this.impactButton.string = travel ? (travel.to > travel.from ? "下潜中…" : "返回中…") : action + "\n点按 / 空格";
+    this.readout.string = damage > 0 ? "地块裂开 " + Math.round(damage * 100) + "%" : nearby ? nearby.title+" · 点互动 / E；普通地面随时可下潜" : theme.objective;
     if (this.lab.message !== this.lastMessage) { this.lastMessage = this.lab.message; this.notice.string = this.lab.message; this.noticeTime = 3.5; }
     this.noticeTime = Math.max(0, this.noticeTime - dt); this.notice.node.active = this.noticeTime > 0;
+    if(this.saveError){this.notice.string=this.saveError;this.notice.node.active=true;}
     this.camera.clearColor = travel ? Color.lerp(new Color(), this.color(LAB_THEMES[this.lab.layer(travel.from).theme].background), this.color(LAB_THEMES[this.lab.layer(travel.to).theme].background), smooth) : this.color(theme.background);
     this.stick.clear(); this.stick.fillColor = this.color(C.background + "df"); this.stick.strokeColor = this.color(C.border); this.stick.lineWidth = 2;
     this.stick.circle(0, 0, 86); this.stick.fill(); this.stick.stroke(); this.stick.circle(0, 0, 62); this.stick.stroke();
     this.stick.fillColor = this.color(this.joystick.id === -1 ? C.muted : C.accent); this.stick.circle(this.joystick.x * 50, this.joystick.y * 50, 27); this.stick.fill();
   }
   onDestroy(): void {
+    this.saveLab();
     if (this.audio) void this.audio.close();
     this.safeAreaObserver?.disconnect(); input.off(Input.EventType.KEY_DOWN, this.keyDown, this); input.off(Input.EventType.KEY_UP, this.keyUp, this);
     game.off(Game.EVENT_HIDE, this.resetInput, this); view.off("canvas-resize", this.resetInput, this);

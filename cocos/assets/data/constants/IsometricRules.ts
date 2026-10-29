@@ -8,3 +8,4 @@ export const LAB_LAYER_GAP = 420;
 export const LAB_BREAK_SECONDS = 1.1;
 export const LAB_TRAVEL_SECONDS = 1.15;
 export const LAB_PARTICLE_CAP = 96;
+export const LAB_TAP_SECONDS = 0.42;

@@ -133,7 +133,8 @@ try {
   assert.equal(await evaluate('qa.root.striking'),false);assert.equal(await evaluate('qa.root.joystick.id'),-1);
   assert.equal(await evaluate('localStorage.getItem("xap-save-v1")'),'web-save-untouched');
   assert.equal(await evaluate('localStorage.getItem("xap-cocos-slot-v1")'),'cocos-save-untouched');
-  await send('Page.reload');await ready();assert.equal(await evaluate('qa.root.lab.depth'),0);
+  await evaluate('qa.root.saveLab()');const persisted=await evaluate('qa.root.words.snapshot()');
+  await send('Page.reload');await ready();assert.equal(await evaluate('qa.root.words.snapshot()'),persisted);
   assert.equal(exceptions.length,0,JSON.stringify(exceptions));
   console.log('PASS: real touch cracks/collapse, 3 independent layers, moving and adjacent mining, two-way persistent passages, repeated descents, resource retention, bounded particles/views, phone, portrait pause, background reset and formal-save isolation.');
 }finally{socket?.close();browser.kill();server.close();}

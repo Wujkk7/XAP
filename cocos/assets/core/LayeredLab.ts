@@ -2,7 +2,7 @@ import { IsometricWalk } from "./Isometric.ts";
 import { hashCoords } from "./rng.ts";
 import { ISOMETRIC_MAP as MAP } from "../data/external-files/IsometricMap.ts";
 import { LAB_THEMES } from "../data/external-files/IsometricLayers.ts";
-import { ISO_PLAYER_RADIUS as R, LAB_BREAK_SECONDS, LAB_TRAVEL_SECONDS } from "../data/constants/IsometricRules.ts";
+import { ISO_PLAYER_RADIUS as R, LAB_BREAK_SECONDS, LAB_TRAVEL_SECONDS, LAB_TAP_SECONDS } from "../data/constants/IsometricRules.ts";
 import { MAX_FRAME_SECONDS } from "../data/constants/GameRules.ts";
 
 export type LabTileKind = "floor" | "path" | "water" | "tree" | "rock" | "root" | "ore" | "wall";
@@ -49,6 +49,7 @@ export class LayeredLab {
   travel: LabTravel | null = null;
   effects: LabEffect[] = [];
   message = "长按砸地，可以打开通向下一层的缺口";
+  canStrike: (x: number, y: number) => boolean = () => true;
   private releaseRequired = false;
   private damageKey = "";
   private hitStage = 0;
@@ -92,6 +93,12 @@ export class LayeredLab {
     this.walk.stop(); this.target = null; this.releaseRequired = true;
     this.message = "地面坍塌了，下面还有一层…";
   }
+  openPassage(x: number, y: number): void {
+    const tile = this.tile(x, y)!;
+    tile.kind = "path"; tile.hole = true; tile.damage = 0;
+    this.layer().revision++; this.clearLanding(this.depth + 1, x, y);
+    this.effect("collapse", x, y); this.message = "符文通道打开了 · 走入缺口可下潜，入口可原路返回";
+  }
   ascend(): boolean {
     if (this.travel || this.depth === 0) return false;
     const x = Math.floor(this.walk.x), y = Math.floor(this.walk.y);
@@ -105,8 +112,13 @@ export class LayeredLab {
     this.walk.x = p ? p.x + 0.5 : MAP.spawn.x; this.walk.y = p ? p.y + 0.5 : MAP.spawn.y;
     this.walk.stop(); this.target = null;
   }
+  tapStrike(): void {
+    if (this.travel || this.releaseRequired) return;
+    this.walk.stop(); this.strike(LAB_TAP_SECONDS);
+  }
   private strike(dt: number): void {
     const { x, y } = this.selected(), tile = this.tile(x, y)!;
+    if (!this.canStrike(x, y)) { this.message = "附近有探索互动 · 点击互动按钮，或换一块普通地面下潜"; return; }
     if (tile.kind === "water") { this.message = "这里是水面，换一块干燥地面再砸"; return; }
     if (tile.hole) {
       if (Math.floor(this.walk.x) === x && Math.floor(this.walk.y) === y) this.descend(x, y);
@@ -122,7 +134,7 @@ export class LayeredLab {
     this.effect("collapse", x, y); tile.damage = 0; this.layer().revision++;
     if (!open(tile)) {
       if (tile.kind === "ore") { this.resources++; this.effect("resource", x, y); this.message = "发现了矿晶 · 本次收集 " + this.resources; }
-      else this.message = "障碍已经敲开，可以继续探索";
+      else { this.resources++; this.message = "障碍敲开 · 采集材料 +1，可用于兑换字母"; }
       tile.kind = "floor"; this.releaseRequired = true; return;
     }
     tile.hole = true; this.layer(this.depth + 1);

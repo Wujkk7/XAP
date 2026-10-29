@@ -23,6 +23,8 @@ import { XPAA_ATLAS_SIZE, XPAA_REGIONS, WALK_CANVAS, walkFrame } from "../cocos/
 import { isoProject, isoUnproject, isoBlocked, IsometricWalk } from "../cocos/assets/core/Isometric.ts";
 import { ISOMETRIC_MAP } from "../cocos/assets/data/external-files/IsometricMap.ts";
 import { LayeredLab, makeLabLayer } from "../cocos/assets/core/LayeredLab.ts";
+import { WordPassages } from "../cocos/assets/core/WordPassages.ts";
+import { LETTERS, LAB_SERVICES } from "../cocos/assets/data/constants/WordPassageRules.ts";
 
 let passed = 0;
 function check(name: string, fn: () => void) {
@@ -471,6 +473,103 @@ check("layered movement and strikes survive 1500 frames without embedding", () =
       assert.ok(!lab.collides(lab.walk.x, lab.walk.y), `embedded at layer ${lab.depth}, frame ${i}`);
       assert.ok(lab.effects.length <= 32);
     }
+  }
+});
+
+check("word passage consumes repeated letters atomically and opens a real returnable channel", () => {
+  const lab = new LayeredLab(), words = new WordPassages(lab);
+  words.room.answer = "APPLE"; lab.walk.x = 6.5; lab.walk.y = 6.5;
+  words.letters.A=1; words.letters.P=1; words.letters.L=1; words.letters.E=1;
+  assert.equal(words.available("P","AP"),0); assert.equal(words.submit("APPLE"),false);
+  assert.equal(words.submit("APBLE"),false); assert.equal(words.letters.P,1);
+  words.letters.P++; assert.ok(words.submit("APPLE")); assert.equal(words.letters.P,0); assert.equal(words.correct.APPLE,1);
+  assert.equal(words.submit("APPLE"),false); assert.ok(lab.tile(6,5)!.hole);
+  lab.walk.x=6.5;lab.walk.y=5.5;lab.tick(.05,0,0,true);
+  for(let i=0;i<30;i++)lab.tick(.05,0,0,false);
+  words.prepare(); assert.equal(lab.depth,1); assert.ok(lab.layer().entrances.some(p=>p.x===6&&p.y===5));
+  assert.ok(!lab.collides(lab.walk.x,lab.walk.y)); assert.ok(lab.ascend());
+  for(let i=0;i<30;i++)lab.tick(.05,0,0,false);
+  assert.equal(lab.depth,0);assert.ok(lab.tile(6,5)!.hole);
+});
+
+check("new gates never reuse reserved or seen words and exhausted pools do not block descent", () => {
+  const lab=new LayeredLab(), words=new WordPassages(lab), answers=new Set<string>();
+  for(let d=0;d<12;d++){
+    lab.depth=d;lab.walk.x=6.5;lab.walk.y=7.5;const r=words.prepare();
+    if(r.answer){assert.ok(!answers.has(r.answer));answers.add(r.answer);words.discover();}
+  }
+  assert.equal(answers.size,9);assert.equal(words.room.answer,'');
+  lab.tick(.05,0,0,false);for(let i=0;i<150&&!lab.travel;i++)lab.tick(.05,0,0,true);
+  assert.ok(lab.travel,'ordinary route works without any letters or remaining words');
+});
+
+check("wrong quiz attempts preserve the same letter rewards but reduce extra coins", () => {
+  const a=new WordPassages(new LayeredLab()),b=new WordPassages(new LayeredLab());
+  const q=a.quiz(0).question;
+  const first=a.answerChest(0,q.correctIndex);
+  assert.equal(b.answerChest(0,(q.correctIndex+1)%4).opened,false);
+  assert.equal(b.answerChest(0,(q.correctIndex+1)%4).opened,false);
+  const floor=b.answerChest(0,(q.correctIndex+1)%4);
+  assert.ok(floor.opened);assert.equal(first.letters,floor.letters);assert.equal(first.letters.length,12);
+  assert.ok(a.coins>b.coins);assert.throws(()=>b.answerChest(0,q.correctIndex));
+});
+
+check("planning is free and targeted exchange cannot create letters without payment", () => {
+  const words=new WordPassages(new LayeredLab());
+  assert.ok(words.track('APPLE'));assert.deepEqual(words.needs(),{A:1,P:2,L:1,E:1});assert.equal(words.letters.P,0);
+  assert.equal(words.exchange('P'),false);words.lab.resources=1;assert.ok(words.exchange('P'));assert.equal(words.lab.resources,0);
+  words.letters.E=3;assert.ok(words.exchange('P','E'));assert.equal(words.letters.E,0);assert.equal(words.letters.P,2);
+  assert.equal(words.exchange('P','P'),false);assert.equal(words.exchange('Q','A'),false);
+  assert.equal(words.track('A1'),false);assert.equal(words.exchange('AB'),false);
+});
+
+check("tracked shortages gently bias deterministic loot without changing letter count", () => {
+  let tracked=0,plain=0;
+  for(let d=0;d<30;d++){
+    const a=new WordPassages(new LayeredLab()),b=new WordPassages(new LayeredLab());
+    a.lab.depth=d;b.lab.depth=d;a.prepare();b.prepare();a.track('QQQQQQQQQQQQQQQQ');
+    for(let index=0;index<3;index++){
+      const qa=a.quiz(index).question,qb=b.quiz(index).question;
+      const aa=a.answerChest(index,qa.correctIndex),bb=b.answerChest(index,qb.correctIndex);
+      assert.equal(aa.letters.length,bb.letters.length);
+      tracked+=Array.from(aa.letters).filter(c=>c==='Q').length;plain+=Array.from(bb.letters).filter(c=>c==='Q').length;
+    }
+  }
+  assert.ok(tracked>plain);assert.ok(tracked<30*3*12*.5,'bias must not replace random drops');
+});
+
+check("ordinary ground accepts discrete taps without requiring letters", () => {
+  const lab=new LayeredLab();new WordPassages(lab);
+  for(let i=0;i<4&&!lab.travel;i++){lab.tick(.01,0,0,false);lab.tapStrike();}
+  assert.ok(lab.travel);assert.ok(lab.tile(6,7,0)!.hole);
+});
+
+check("hints cost ordinary resources once and clue discovery unlocks the full word", () => {
+  const words=new WordPassages(new LayeredLab());assert.equal(words.hint(),false);
+  words.lab.resources=1;assert.ok(words.hint());assert.ok(words.hint());assert.equal(words.lab.resources,0);
+  assert.equal(words.learn(),words.room.answer);assert.ok(words.seen.includes(words.room.answer));
+});
+
+check("experiment save restores terrain, inventory, attempts and progression without formal save access", () => {
+  const words=new WordPassages(new LayeredLab());words.lab.resources=5;words.track('APPLE');words.exchange('P');words.learn();
+  const q=words.quiz(1).question;words.answerChest(1,(q.correctIndex+1)%4);
+  const raw=words.snapshot(),copy=new WordPassages(new LayeredLab());copy.restore(raw);assert.equal(copy.snapshot(),raw);
+  const state=copy.snapshot();for(const change of [
+    (s:any)=>s.letters.P=-1,(s:any)=>s.x=NaN,(s:any)=>s.rooms['0'].attempts[0]=9,
+    (s:any)=>s.layers[0].tiles[0][0].kind='invalid',(s:any)=>s.layers.push(s.layers[0]),
+  ]){const bad=JSON.parse(raw);change(bad);assert.throws(()=>copy.restore(JSON.stringify(bad)));assert.equal(copy.snapshot(),state);}
+});
+
+check("service routes stay reachable and letter gameplay survives 1500 exploration frames", () => {
+  for(let d=0;d<3;d++){
+    const lab=new LayeredLab(),words=new WordPassages(lab);lab.depth=d;words.prepare();
+    const queue=[[6,7]],seen=new Set(['6,7']);
+    for(let i=0;i<queue.length;i++){const[x,y]=queue[i];for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){
+      const nx=x+dx,ny=y+dy,k=nx+','+ny,t=lab.tile(nx,ny);
+      if(t&&['floor','path'].includes(t.kind)&&!seen.has(k)){seen.add(k);queue.push([nx,ny]);}
+    }}
+    for(const p of words.services)assert.ok(seen.has(p.x+','+p.y));
+    for(let i=0;i<500;i++){lab.tick(1/60,Math.sin(i*.13),Math.cos(i*.19),i%100<20);words.prepare();assert.ok(!lab.collides(lab.walk.x,lab.walk.y));}
   }
 });
 

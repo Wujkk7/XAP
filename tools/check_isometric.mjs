@@ -74,7 +74,7 @@ try {
     await send('Input.dispatchKeyEvent',{type:'keyUp',code,key,windowsVirtualKeyCode:number});await delay(150);
   };
   await ready(); await shot('isometric-overview');
-  assert.equal(await evaluate('qa.root.actors.length'),16);
+  assert.equal(await evaluate('qa.root.actors.length'),22); // Existing props/player plus six optional exploration services.
   const before=await evaluate('({x:qa.root.walk.x,y:qa.root.walk.y})');
   await key('KeyD','d',68,450);
   const after=await evaluate('({x:qa.root.walk.x,y:qa.root.walk.y})');
@@ -104,9 +104,10 @@ try {
   await send('Emulation.setDeviceMetricsOverride',{width:844,height:390,deviceScaleFactor:1,mobile:true});await delay(200);
   await evaluate('localStorage.setItem("xap-cocos-slot-v1","formal-save-sentinel");qa.root.joystick={x:1,y:0,id:7};qa.cc.game.emit(qa.cc.Game.EVENT_HIDE)');
   assert.equal(await evaluate('qa.root.joystick.id'),-1);
+  await evaluate('qa.root.saveLab()');const persisted=await evaluate('({x:qa.root.walk.x,y:qa.root.walk.y})');
   await send('Page.reload');await ready();
   assert.equal(await evaluate('localStorage.getItem("xap-cocos-slot-v1")'),'formal-save-sentinel');
-  assert.equal(await evaluate('qa.root.walk.x'),6.5);assert.equal(await evaluate('qa.root.walk.y'),7.5);
+  assert.equal(await evaluate('qa.root.walk.x'),persisted.x);assert.equal(await evaluate('qa.root.walk.y'),persisted.y);
   assert.equal(exceptions.length,0,JSON.stringify(exceptions));
   console.log('PASS: isometric scene, screen-relative keyboard and joystick, finite map, grid/camera toggles, depth order and fade, reset, phone layout, portrait pause and formal-save isolation.');
 }finally{socket?.close();browser.kill();server.close();}
