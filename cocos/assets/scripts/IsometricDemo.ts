@@ -16,10 +16,12 @@ import { WordPassages } from "../core/WordPassages";
 import { WordPassageUI } from "./WordPassageUI";
 import { LAB_STORAGE_KEY } from "../data/player-data/LabSave";
 import { LAB_WORD_RULES } from "../data/constants/WordPassageRules";
+import { labBrightness, smoothBrightness } from "../core/LabLighting";
+import { LAB_LAMP } from "../data/constants/IsometricRules";
 
 const { ccclass } = _decorator;
-interface Actor { x: number; y: number; width: number; node: Node; sprite?: Sprite; opacity: UIOpacity }
-interface LayerView { node: Node; actorsNode: Node; actors: Actor[]; grid: Graphics; revision: number; floors: Map<string, Node> }
+interface Actor { x: number; y: number; width: number; node: Node; sprite?: Sprite; opacity: UIOpacity; brightness?: number; paint?: (light: number) => void }
+interface LayerView { node: Node; actorsNode: Node; actors: Actor[]; grid: Graphics; fog: Graphics; brightness: Float32Array; revision: number; floors: Map<string, Node> }
 interface Fragment { x: number; y: number; depth: number; vx: number; vy: number; age: number; life: number; size: number; color: string }
 
 @ccclass("IsometricDemo")
@@ -264,8 +266,8 @@ export class IsometricDemo extends Component {
     const left = isoProject(0, n), bottom = isoProject(n, n), right = isoProject(n, 0);
     for (let band = 0; band < 3; band++) {
       const offset = band * 18, lower = offset + 18;
-      this.polygon(edge, [{ x: left.x, y: left.y - offset }, { x: bottom.x, y: bottom.y - offset }, { x: bottom.x, y: bottom.y - lower }, { x: left.x, y: left.y - lower }], this.shade(theme.side, 1 - band * 0.14));
-      this.polygon(edge, [{ x: bottom.x, y: bottom.y - offset }, { x: right.x, y: right.y - offset }, { x: right.x, y: right.y - lower }, { x: bottom.x, y: bottom.y - lower }], this.shade(theme.edge, 1 - band * 0.12));
+      this.polygon(edge, [{ x: left.x, y: left.y - offset }, { x: bottom.x, y: bottom.y - offset }, { x: bottom.x, y: bottom.y - lower }, { x: left.x, y: left.y - lower }], this.shade(theme.side, (depth>0?.14:1)*(1 - band * 0.14)));
+      this.polygon(edge, [{ x: bottom.x, y: bottom.y - offset }, { x: right.x, y: right.y - offset }, { x: right.x, y: right.y - lower }, { x: bottom.x, y: bottom.y - lower }], this.shade(theme.edge, (depth>0?.14:1)*(1 - band * 0.12)));
     }
     const ground = this.make("地面网格", node), floors = new Map<string, Node>();
     for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
@@ -305,6 +307,8 @@ export class IsometricDemo extends Component {
       grid.moveTo(a.x, a.y); grid.lineTo(b.x, b.y); grid.moveTo(c.x, c.y); grid.lineTo(d.x, d.y);
     }
     grid.stroke();
+    const fog = this.make("地下矿灯暗幕", node).addComponent(Graphics);
+    const brightness = new Float32Array(n*n).fill(-1);
     const actorsNode = this.make("脚底排序", node), actors: Actor[] = [];
     for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
       const kind = layer.tiles[y][x].kind;
@@ -317,18 +321,20 @@ export class IsometricDemo extends Component {
       } else if (kind === "root" || kind === "wall") {
         const p = isoProject(x + 0.5, y + 0.5), obstacle = this.make(kind, actorsNode, p.x, p.y, W, 90), g = obstacle.addComponent(Graphics);
         obstacle.getComponent(UITransform)!.setAnchorPoint(0.5, 0);
+        const paint=(light:number)=>{g.clear();
         if (kind === "root") {
-          g.strokeColor = this.color("3c2e23"); g.lineWidth = 18;
+          g.strokeColor = this.color(this.shade("3c2e23",light)); g.lineWidth = 18;
           g.moveTo(-35, -2); g.bezierCurveTo(-14, 29, 5, 9, 32, 32); g.stroke();
-          g.strokeColor = this.color("967450"); g.lineWidth = 9;
+          g.strokeColor = this.color(this.shade("967450",light)); g.lineWidth = 9;
           g.moveTo(-35, 2); g.bezierCurveTo(-14, 33, 5, 13, 32, 36); g.stroke();
           g.lineWidth = 4; g.moveTo(-6, 19); g.bezierCurveTo(8, 48, 25, 34, 35, 46); g.stroke();
         } else {
-          this.polygon(g, [{ x: -48, y: 0 }, { x: 0, y: -24 }, { x: 0, y: 22 }, { x: -48, y: 46 }], "394453");
-          this.polygon(g, [{ x: 0, y: -24 }, { x: 48, y: 0 }, { x: 48, y: 46 }, { x: 0, y: 22 }], "263240");
-          this.polygon(g, [{ x: 0, y: 70 }, { x: 48, y: 46 }, { x: 0, y: 22 }, { x: -48, y: 46 }], "647180");
+          this.polygon(g, [{ x: -48, y: 0 }, { x: 0, y: -24 }, { x: 0, y: 22 }, { x: -48, y: 46 }], this.shade("394453",light));
+          this.polygon(g, [{ x: 0, y: -24 }, { x: 48, y: 0 }, { x: 48, y: 46 }, { x: 0, y: 22 }], this.shade("263240",light));
+          this.polygon(g, [{ x: 0, y: 70 }, { x: 48, y: 46 }, { x: 0, y: 22 }, { x: -48, y: 46 }], this.shade("647180",light));
         }
-        actors.push({ node: obstacle, x: x + 0.5, y: y + 0.5, width: W, opacity: obstacle.addComponent(UIOpacity) });
+        };paint(1);
+        actors.push({ node: obstacle, x: x + 0.5, y: y + 0.5, width: W, opacity: obstacle.addComponent(UIOpacity),paint });
       }
     }
     if (depth === this.lab.depth) for (const p of this.words.services) {
@@ -339,13 +345,36 @@ export class IsometricDemo extends Component {
       const at = isoProject(p.x+.5,p.y+.5), block=this.make(p.title,actorsNode,at.x,at.y,W,70), g=block.addComponent(Graphics);
       block.getComponent(UITransform)!.setAnchorPoint(.5,0);
       const hue=p.id==='seal'?'b69865':p.id==='clue'?'7eabb5':'ba945d';
-      this.polygon(g,[{x:-26,y:0},{x:0,y:-13},{x:0,y:18},{x:-26,y:31}],this.shade(hue,.65));
-      this.polygon(g,[{x:0,y:-13},{x:26,y:0},{x:26,y:31},{x:0,y:18}],this.shade(hue,.8));
-      this.polygon(g,[{x:-26,y:31},{x:0,y:44},{x:26,y:31},{x:0,y:18}],hue);
+      const paint=(light:number)=>{g.clear();
+      this.polygon(g,[{x:-26,y:0},{x:0,y:-13},{x:0,y:18},{x:-26,y:31}],this.shade(hue,.65*light));
+      this.polygon(g,[{x:0,y:-13},{x:26,y:0},{x:26,y:31},{x:0,y:18}],this.shade(hue,.8*light));
+      this.polygon(g,[{x:-26,y:31},{x:0,y:44},{x:26,y:31},{x:0,y:18}],this.shade(hue,light));
+      };paint(1);
       this.text(block,"标识",p.id==='seal'?'◇':p.id==='clue'?'碑':'箱',0,32,50,23);
-      actors.push({node:block,x:p.x+.5,y:p.y+.5,width:W,opacity:block.addComponent(UIOpacity)});
+      actors.push({node:block,x:p.x+.5,y:p.y+.5,width:W,opacity:block.addComponent(UIOpacity),paint});
     }
-    const view = { node, actorsNode, actors, grid, revision: layer.revision, floors }; this.layerViews.set(depth, view); return view;
+    const view = { node, actorsNode, actors, grid, fog, brightness, revision: layer.revision, floors }; this.layerViews.set(depth, view); return view;
+  }
+
+  private lightLayers(dt: number): void {
+    for (const [depth,v] of this.layerViews) {
+      const g=v.fog; g.clear();
+      if(depth===0)continue;
+      for(let y=0;y<MAP.size;y++)for(let x=0;x<MAP.size;x++){
+        const i=y*MAP.size+x,target=labBrightness(depth,Math.hypot(x+.5-this.walk.x,y+.5-this.walk.y));
+        v.brightness[i]=smoothBrightness(v.brightness[i],target,dt);
+        this.diamond(g,x,y,LAB_LAMP.darkness+Math.round(255*(1-v.brightness[i])).toString(16).padStart(2,"0"));
+      }
+      // Upright props must disappear with their ground; a floor-only mask leaves distant chests exposed.
+      for(const actor of v.actors){
+        const target=labBrightness(depth,Math.hypot(actor.x-this.walk.x,actor.y-this.walk.y));
+        actor.brightness=smoothBrightness(actor.brightness??-1,target,dt);
+        const at=isoProject(actor.x,actor.y),p=isoProject(this.walk.x,this.walk.y),h=actor.node.getComponent(UITransform)!.height;
+        actor.opacity.opacity=Math.round(255*Math.pow(actor.brightness,1.35)*occlusionAlpha(at.x-p.x,p.y-at.y,actor.width,h,48,69));
+        // Graphics bakes vertex colours and does not honor UIOpacity like Sprite/Label.
+        actor.paint?.(Math.pow(actor.brightness,1.35));
+      }
+    }
   }
 
   private drawPortal(g: Graphics, layer: LabLayer, x: number, y: number): void {
@@ -515,6 +544,7 @@ export class IsometricDemo extends Component {
       if (actor !== this.player && this.wordUI.mode === "seal" && actor.x === this.words.services[0].x+.5 && actor.y === this.words.services[0].y+.5)
         actor.node.setPosition(foot.x+(this.swingAge<.2?Math.sin(this.swingAge*100)*2:0),foot.y);
     });
+    this.lightLayers(dt);
     Array.from(this.layerViews.entries()).sort((a, b) => b[0] - a[0]).forEach(([, v], i) => { v.node.setSiblingIndex(i); v.grid.node.active = this.grid; });
     this.marker.node.setSiblingIndex(this.world.children.length - 1); this.pickup.node.setSiblingIndex(this.world.children.length - 1);
     if (travel) this.player.node.setSiblingIndex(this.world.children.length - 1);
@@ -542,7 +572,8 @@ export class IsometricDemo extends Component {
     if (this.lab.message !== this.lastMessage) { this.lastMessage = this.lab.message; this.notice.string = this.lab.message; this.noticeTime = 3.5; }
     this.noticeTime = Math.max(0, this.noticeTime - dt); this.notice.node.active = this.noticeTime > 0;
     if(this.saveError){this.notice.string=this.saveError;this.notice.node.active=true;}
-    this.camera.clearColor = travel ? Color.lerp(new Color(), this.color(LAB_THEMES[this.lab.layer(travel.from).theme].background), this.color(LAB_THEMES[this.lab.layer(travel.to).theme].background), smooth) : this.color(theme.background);
+    const sky=(depth:number)=>this.color(depth===0?LAB_THEMES[0].background:LAB_LAMP.darkness);
+    this.camera.clearColor = travel ? Color.lerp(new Color(), sky(travel.from), sky(travel.to), smooth) : sky(this.lab.depth);
     this.stick.clear(); this.stick.fillColor = this.color(C.background + "df"); this.stick.strokeColor = this.color(C.border); this.stick.lineWidth = 2;
     this.stick.circle(0, 0, 86); this.stick.fill(); this.stick.stroke(); this.stick.circle(0, 0, 62); this.stick.stroke();
     this.stick.fillColor = this.color(this.joystick.id === -1 ? C.muted : C.accent); this.stick.circle(this.joystick.x * 50, this.joystick.y * 50, 27); this.stick.fill();

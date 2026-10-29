@@ -6,9 +6,9 @@ Safari 私人远程试玩与版本记录见 [PREVIEW.md](PREVIEW.md)。
 
 开发顺序、验收标准与勾选进度见 [开发计划 PLAN.md](PLAN.md)。
 
-## 等距菱形视角体验版（仅本分支）
+## 等距菱形视角与多层体验版（已合入 main）
 
-`codex/isometric-view-lab` 现为“破土向下”多层可玩实验，正式 main 保持原版本。在 Creator 打开 `cocos/assets/scenes/Isometric.scene` 预览：每层独立 13×13 网格，点按或长按砸穿脚下，进入森林、巨根、矿岩等独立空间；可收集材料、反复深入并返回旧通道。新增宝箱认词、字母收集/兑换与可选拼词通道，普通下潜不受英语限制。摇杆/WASD 移动，空格敲击，E 互动、B 字母袋，Q 回上一层（站在入口），R 回本层入口，G/F 切换网格/镜头。实验使用独立续档，不读写正式玩家存档。
+多层与字母通道玩法已于 2026-10-29 从 `codex/isometric-view-lab` 合入 `main`，旧 `Main.scene` 保留。在 Creator 打开 `cocos/assets/scenes/Isometric.scene` 预览：每层独立 13×13 网格，点按或长按砸穿脚下，进入森林、巨根、矿岩等独立空间；可收集材料、反复深入并返回旧通道。新增宝箱认词、字母收集/兑换与可选拼词通道，普通下潜不受英语限制。地下矿灯视野有限，碑文只提供线索让玩家猜词。摇杆/WASD 移动，空格敲击，E 互动、B 字母袋，Q 回上一层（站在入口），R 回本层入口，G/F 切换网格/镜头。实验使用独立续档，不读写正式玩家存档。
 
 构建选择 `Isometric` 启动场景，Web Mobile 输出名设为 `isometric`。构建后运行 `node tools/check_layered_lab.mjs` 验证三层连续突破，`node tools/check_word_passages.mjs` 验证拼词通道和实验续档；`node tools/check_isometric.mjs` 保留原移动/视角回归。独立远程路径为原私人站点的 `/isometric/`，发布结果见 PREVIEW.md。实现方式、限制及下一步见 [多层体验版说明](LAYERED_LAB.md)。
 

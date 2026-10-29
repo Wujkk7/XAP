@@ -114,7 +114,11 @@ try {
   await shot('word-chest');await tap(0,-284);
 
   await go(5.5,7.5,5,6);assert.equal(await evaluate('qa.root.wordUI.mode'),'clue');
-  assert.equal(await evaluate('qa.root.words.room.learned'),true);await shot('word-clue');await tap(525,23);
+  assert.equal(await evaluate('qa.root.words.room.learned'),true);
+  const clueText=await evaluate(`(()=>{const walk=n=>[...(n.getComponents(qa.cc.Label)||[]).map(l=>l.string),...n.children.flatMap(walk)];return walk(qa.root.wordUI.panel).join(' ');})()`);
+  assert.ok(!new RegExp('\\b'+answer+'\\b','i').test(clueText),'inscription must not show the answer');
+  assert.equal(await evaluate('qa.root.words.visibleWords().includes(qa.root.words.room.answer)'),false);
+  await shot('word-clue');await tap(525,23);
   await evaluate('qa.root.lab.resources=100');
   await go(6.5,6.5,7,6);assert.equal(await evaluate('qa.root.wordUI.mode'),'npc');
   const needs=await evaluate('qa.root.words.needs(qa.root.words.room.answer)');

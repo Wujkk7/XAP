@@ -25,6 +25,7 @@ import { ISOMETRIC_MAP } from "../cocos/assets/data/external-files/IsometricMap.
 import { LayeredLab, makeLabLayer } from "../cocos/assets/core/LayeredLab.ts";
 import { WordPassages } from "../cocos/assets/core/WordPassages.ts";
 import { LETTERS, LAB_SERVICES } from "../cocos/assets/data/constants/WordPassageRules.ts";
+import { labBrightness, smoothBrightness } from "../cocos/assets/core/LabLighting.ts";
 
 let passed = 0;
 function check(name: string, fn: () => void) {
@@ -544,10 +545,22 @@ check("ordinary ground accepts discrete taps without requiring letters", () => {
   assert.ok(lab.travel);assert.ok(lab.tile(6,7,0)!.hole);
 });
 
-check("hints cost ordinary resources once and clue discovery unlocks the full word", () => {
+check("clue observations support guessing without leaking unresolved answers through the dex", () => {
   const words=new WordPassages(new LayeredLab());assert.equal(words.hint(),false);
   words.lab.resources=1;assert.ok(words.hint());assert.ok(words.hint());assert.equal(words.lab.resources,0);
-  assert.equal(words.learn(),words.room.answer);assert.ok(words.seen.includes(words.room.answer));
+  words.discover();const observation=words.learn();assert.ok(observation.length>20);
+  assert.ok(!new RegExp('\\b'+words.room.answer+'\\b','i').test(observation));
+  assert.ok(words.seen.includes(words.room.answer));assert.ok(!words.visibleWords().includes(words.room.answer));
+  words.room.opened=true;assert.ok(words.visibleWords().includes(words.room.answer));
+});
+
+check("underground lamp has finite smooth falloff while the surface remains bright", () => {
+  assert.equal(labBrightness(0,100),1);assert.equal(labBrightness(1,0),1);
+  assert.ok(labBrightness(1,1)>labBrightness(1,2));assert.ok(labBrightness(1,2)>labBrightness(1,3));
+  assert.ok(labBrightness(1,4)<.04);assert.equal(labBrightness(1,10),labBrightness(9,10));
+  let light=1;const target=labBrightness(1,4);
+  for(let i=0;i<60;i++){const next=smoothBrightness(light,target,1/60);assert.ok(next<=light&&next>=target);light=next;}
+  assert.ok(Math.abs(light-target)<.001);assert.equal(smoothBrightness(-1,target,1/60),target);
 });
 
 check("experiment save restores terrain, inventory, attempts and progression without formal save access", () => {

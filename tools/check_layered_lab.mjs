@@ -97,6 +97,10 @@ try {
   assert.equal(await evaluate('qa.root.lab.layer().theme'),1);
   assert.ok(await evaluate('qa.root.lab.layer().tiles.flat().some(t=>t.kind==="root")'));
   assert.equal(await evaluate('qa.root.lab.collides(qa.root.walk.x,qa.root.walk.y)'),false);
+  const light=await evaluate(`(()=>{const v=qa.root.layerViews.get(1);return {near:v.brightness[7*13+6],far:v.brightness[0],hidden:v.actors.filter(a=>Math.hypot(a.x-qa.root.walk.x,a.y-qa.root.walk.y)>3.5).map(a=>a.opacity.opacity)};})()`);
+  assert.ok(light.near>.95);assert.ok(light.far<.04);assert.ok(light.hidden.length>0);assert.ok(light.hidden.every(n=>n<10));
+  const painted=await evaluate(`qa.root.layerViews.get(1).actors.filter(a=>a.paint&&Math.hypot(a.x-qa.root.walk.x,a.y-qa.root.walk.y)>3.5).map(a=>{const g=a.node.getComponent(qa.cc.Graphics),c=a.node.name==='root'?g.strokeColor:g.fillColor;return Math.max(c.r,c.g,c.b);})`);
+  assert.ok(painted.length>0);assert.ok(painted.every(n=>n<20),'distant Graphics must not retain bright vertex colours');
   const before=await evaluate('qa.root.walk.distance');await key('KeyD','d',68,250);
   assert.ok(await evaluate('qa.root.walk.distance')>before);
 

@@ -9,3 +9,4 @@ export const LAB_BREAK_SECONDS = 1.1;
 export const LAB_TRAVEL_SECONDS = 1.15;
 export const LAB_PARTICLE_CAP = 96;
 export const LAB_TAP_SECONDS = 0.42;
+export const LAB_LAMP = { radius: 3.4, clearRadius: 0.9, ambient: 0.025, smoothing: 12, darkness: "05090d" } as const;

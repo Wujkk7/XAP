@@ -39,7 +39,7 @@ export class WordPassageUI {
     if(this.locked)return;
     this.mode=mode;this.chest=index;this.draft='';this.status='';this.panel.active=true;this.words.lab.walk.stop();
     if(mode==='seal')this.words.discover();
-    if(mode==='clue')this.status=this.words.learn()+' · 已收入图鉴';
+    if(mode==='clue'){this.words.learn();this.status='观察记录已保存 · 根据刻痕猜测，不直接公布答案';}
     this.render();this.changed();
   }
   close():void {if(this.locked)return;this.draft='';this.panel.active=false;this.mode='';this.closed();this.changed();}
@@ -54,8 +54,8 @@ export class WordPassageUI {
     this.feedback=this.text(this.status,0,-184,1100,22);
     if(this.mode==='chest'){this.renderChest();return;}
     if(this.mode==='clue'){
-      this.text(this.words.room.answer+'  /  '+(this.words.room.answer?this.words.clue():'未发现新的符文'),0,75,1050,30);
-      this.text('碑文描绘了这件事物，并留下了它的英文名字。可到字母袋重新查看。',0,-10,1000,23);
+      this.text(this.words.observation(),0,75,1050,27);
+      this.text('这些图案可能与附近符文有关。你觉得它们在描述什么？',0,-10,1000,23);
       this.button('返回探索',0,-95,240,()=>this.close());return;
     }
     if(this.mode==='bag'){
@@ -64,7 +64,7 @@ export class WordPassageUI {
       this.keyboard(false,17);
       this.button('计划拼词',-390,-139,190,()=>this.open('plan'));
       this.button('清除追踪',-170,-139,190,()=>{this.words.tracked='';this.refresh();this.changed();});
-      this.button('已见图鉴',60,-139,190,()=>{this.status='已见：'+(this.words.seen.join(' · ')||'暂无');this.refresh();});
+      this.button('已见图鉴',60,-139,190,()=>{this.status='词条：'+(this.words.visibleWords().join(' · ')||'暂无已公开词条')+(this.words.room.learned?' · 已观察碑文，可回去重看线索':'');this.refresh();});
       this.button('返回探索',390,-139,190,()=>this.close());this.refresh();return;
     }
     if(this.mode==='npc'){
@@ -78,7 +78,7 @@ export class WordPassageUI {
     const planning=this.mode==='plan';
     this.text(planning?'填写猜测的完整单词，只计算缺口，不判断对错。':this.words.clue(),0,111,1110,22);
     this.line=this.text('',-135,62,820,29);
-    if(!planning)this.button(this.words.room.hint?this.words.room.answer.length+' 个字母':'词长提示 · 1 材料',425,64,280,()=>{this.status=this.words.hint()?'答案有 '+this.words.room.answer.length+' 个字母':'材料不足；也可探索蓝色碑文找词条';this.render();this.changed();});
+    if(!planning)this.button(this.words.room.hint?this.words.room.answer.length+' 个字母':'词长提示 · 1 材料',425,64,280,()=>{this.status=this.words.hint()?'答案有 '+this.words.room.answer.length+' 个字母':'材料不足；也可观察蓝色碑文寻找线索';this.render();this.changed();});
     this.keyboard(true,17);
     this.button('退格',-450,-139,150,()=>{this.draft=this.draft.slice(0,-1);this.refresh();});
     this.button('清空',-270,-139,150,()=>{this.draft='';this.refresh();});

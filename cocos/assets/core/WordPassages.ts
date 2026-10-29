@@ -61,7 +61,11 @@ export class WordPassages {
   }
   track(word: string): boolean { if (!/^[A-Z]{1,16}$/.test(word)) return false; this.tracked = word; return true; }
   hint(): boolean { if (this.room.hint) return true; if (this.lab.resources < RULE.hintCost) return false; this.lab.resources -= RULE.hintCost; this.room.hint = true; return true; }
-  learn(): string { this.room.learned = true; this.markSeen(this.room.answer); return this.room.answer; }
+  learn(): string { this.room.learned = true; this.markSeen(this.room.answer); return this.observation(); }
+  observation(): string { return PASSAGE_WORDS.find(w => w.word === this.room.answer)?.observation ?? '没有新的刻痕。'; }
+  visibleWords(): string[] {
+    return this.seen.filter(w => !Object.values(this.rooms).some(r => r.answer === w && !r.opened));
+  }
   cost(letter: string): number { return 'JQXZKV'.includes(letter) ? RULE.rareCost : RULE.commonCost; }
   exchange(letter: string, source?: string): boolean {
     if (!LETTERS.includes(letter) || letter.length !== 1) return false;
