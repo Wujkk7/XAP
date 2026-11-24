@@ -17,7 +17,7 @@ export const STRATUM_TINT: Record<number, string> = {
 };
 
 export const ITEM_NAMES: Record<string, string> = {
-  coin: "金币", wood: "木头", stone: "石头", ore_copper: "铜矿", ore_iron: "铁矿",
+  coin: "金币", wood: "木头", stone: "石头", dirt: "泥土", ore_copper: "铜矿", ore_iron: "铁矿",
   ore_gold: "金矿", ore_diamond: "钻石", ore_starcore: "星核",
 };
 

@@ -5,15 +5,35 @@
 当前为仅站点所有者可访问的私人预览。若浏览器提示登录，使用创建此预览的同一 ChatGPT 账号。
 这是一份独立托管的 HTTPS 构建，不依赖开发电脑的本地预览服务器。
 
-## 当前版本
+## 最新更新：自动挖取与厚地块（2026-10-29）
+
+- [Safari 试玩入口](https://xap-digging-preview-wujkk7.sugaryharp130.chatgpt.site/isometric/)，仍为 v1.0.1 场景。原根路径与所有者私人权限保留。
+- 挖掘键自动选择邻近、面向优先的树石/矿物/土层/岩壁；保持受击目标，保留精确点选。新增同层可挖土块与岩壁带，厚地层/洞口 96px，墙厚 72px、低矮土块 14px，墙体遮挡角色时半透明。
+- 实验载荷 v3 自动迁移 v1/v2：只补入未改造外围地面，保留已挖墙、洞口、角色空间和历史通行资格，原实验键不变，正式存档不读写。
+- 58 组 Node、严格 TS、Creator（36）和三套浏览器回归通过；真实触屏只按挖掘键破坏土块/墙并走过新通路，旧档迁移和原玩法不回退。本机矿岩层 284 物件，120 帧静止光照/渐隐零重绘，光照 CPU 约 0.109ms/帧；iPhone 新包真机仍待复测。
+- 游戏仓库仍为未提交工作区快照；基线 8bf7b96aa9243fb963f1b7994ed001c02ab36681，源码/资产指纹 db0d7ee311f1a1ba7e9bb6a5c0469bebff18ec5dfa0dd78da2ddf87e6c272868。source-version.json 记录 feature=automatic-nearby-mining-and-thick-excavatable-terrain、save_version=3。
+- Site 源码提交 4a8e837d2eda86734c231e63b93e22e046ada3ea；发布版本 appgprj_6ae05ff3aefc8191839dcfc092c6aa7f~appgver_744d354e02c481919164d9e0c1bcc36b。
+- 部署 appgdep_6ae30fcb62dc8191b02c8c590b58cb3f 返回 succeeded。电脑离线时仍可试玩，进度留在对应浏览器本地。
+
+## 上一版：v1.0.1 整合扩图（2026-10-29）
+
+- 入口：[v1.0.1 · 等距多层挖宝](https://xap-digging-preview-wujkk7.sugaryharp130.chatgpt.site/isometric/)。原根路径 v1.0.0 产物保留，仍为所有者私人访问。
+- 内容：25×25 扩图、资源背包、词义/掌握度图鉴、词卡、顽固石、梅婆婆村庄对话、强制破封与光照重绘优化；54 组 Node、严格 TS、Creator（36）和三套浏览器回归通过。iPhone 实机待验收。
+- 实验存档自动从载荷 v1 升级到 v2，原 13×13 区域和旧通道保留，扩充外围；旧档已到达深度保留通行资格。新词用尽后暂停开放新深度。正式存档不读取、不覆盖。
+- 游戏源码为本地 main 工作区快照，尚未提交/推送游戏仓库；基线提交 8bf7b96aa9243fb963f1b7994ed001c02ab36681。不能将该基线提交误认为已包含本轮代码。构建 source-version.json 记录版本 1.0.1、working_tree=true 及资产/源码指纹 acb346afdc91309bdb17c6f582fff03ce6a5ed8c7ea91a29fee0c850af7eed03。
+- Site 源码提交：d5f106661a7e1906728cfcc90a734e617f33187c。
+- 发布版本：appgprj_6ae05ff3aefc8191839dcfc092c6aa7f~appgver_83aae5b384388191850e0106e490a75f。
+- 部署 appgdep_6ae307d27ba881918d0a4c8ef2074dbd，Sites 返回 succeeded。试玩托管已更新，不需要开发电脑在线。
+
+## v1.0.0 根路径保留版本
 
 - 游戏源码：`Wujkk7/XAP`，提交 `8803d8b15d194850e56a7443a744ab9273972386`。
 - XPAA 阶段一 UI：1280×720 横屏、2D 3/4 正交视图、地面 72×48，人物保持原素材比例。使用用户选定图集的主角四向行走、两棵树、石头和草地；建筑、NPC 与地下矿物暂沿用旧素材，存档 v1 不变。
 - 轻量界面：深度/金币常驻，右上背包与每页 8 词的图鉴，左下摇杆，右下长按挖掘与上下井/交谈；独立触点、面板暂停、短消息、横竖屏提示及安全区适配。
 - 运行内容：Creator 3.8.8 的 Web Mobile 构建，与本地验证版本相同。
 - 站点 ID：`appgprj_6ae05ff3aefc8191839dcfc092c6aa7f`。
-- 整站发布版本：`appgprj_6ae05ff3aefc8191839dcfc092c6aa7f~appgver_d2a44bc556ac8191a889912a6b54fc58`。
-- 站点源码提交：`dbfef110147b1b8da8cb0972bbdab054f5d25f97`；部署：`appgdep_6ae2ba328de8819186a030ff0f3f3291`，2026-10-29 成功。此次只更新 /isometric/ 为有限矿灯视野与线索碑文版，根路径阶段一产物保留。
+- 整站发布版本：`appgprj_6ae05ff3aefc8191839dcfc092c6aa7f~appgver_744d354e02c481919164d9e0c1bcc36b`。
+- 站点源码提交：`4a8e837d2eda86734c231e63b93e22e046ada3ea`；部署：`appgdep_6ae30fcb62dc8191b02c8c590b58cb3f`，2026-10-29 成功。此次只更新 /isometric/ 为 自动挖取与厚地块版，根路径阶段一产物保留。
 - Site 本地工作目录：`.local-sites/xap-preview/`，其 `.openai/hosting.json` 保存站点身份；该目录不进入游戏源码仓库。
 - 部署状态：已成功发布；构建内 `source-version.json` 记录对应的游戏源码提交。
 
@@ -23,7 +43,7 @@ Safari 试玩与 Creator 本地预览不会自动交换存档。
 
 ## 后续更新
 
-### 破土向下 · 多层等距体验版（实验分支）
+### 历史发布：破土向下黑暗版（已由 v1.0.1 更新）
 
 - 入口：[等距视角实验](https://xap-digging-preview-wujkk7.sugaryharp130.chatgpt.site/isometric/)。访问范围仍为原站点所有者私人预览。
 - 当前代码已合入 `main`，实验分支保留快照；本轮游戏源码提交 `30f0179f6bd0d2689349098eb79990d1900f9927`。

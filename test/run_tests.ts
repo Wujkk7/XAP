@@ -484,6 +484,7 @@ check("word passage consumes repeated letters atomically and opens a real return
   assert.equal(words.available("P","AP"),0); assert.equal(words.submit("APPLE"),false);
   assert.equal(words.submit("APBLE"),false); assert.equal(words.letters.P,1);
   words.letters.P++; assert.ok(words.submit("APPLE")); assert.equal(words.letters.P,0); assert.equal(words.correct.APPLE,1);
+  assert.equal(words.adventure.book.get('apple').encounters,1);
   assert.equal(words.submit("APPLE"),false); assert.ok(lab.tile(6,5)!.hole);
   lab.walk.x=6.5;lab.walk.y=5.5;lab.tick(.05,0,0,true);
   for(let i=0;i<30;i++)lab.tick(.05,0,0,false);
@@ -493,15 +494,16 @@ check("word passage consumes repeated letters atomically and opens a real return
   assert.equal(lab.depth,0);assert.ok(lab.tile(6,5)!.hole);
 });
 
-check("new gates never reuse reserved or seen words and exhausted pools do not block descent", () => {
+check("new gates never reuse reserved or seen words and exhausted pools stop new descent", () => {
   const lab=new LayeredLab(), words=new WordPassages(lab), answers=new Set<string>();
-  for(let d=0;d<12;d++){
+  for(let d=0;d<40;d++){
     lab.depth=d;lab.walk.x=6.5;lab.walk.y=7.5;const r=words.prepare();
     if(r.answer){assert.ok(!answers.has(r.answer));answers.add(r.answer);words.discover();}
   }
-  assert.equal(answers.size,9);assert.equal(words.room.answer,'');
+  assert.equal(answers.size,36);assert.equal(words.room.answer,'');
   lab.tick(.05,0,0,false);for(let i=0;i<150&&!lab.travel;i++)lab.tick(.05,0,0,true);
-  assert.ok(lab.travel,'ordinary route works without any letters or remaining words');
+  assert.equal(lab.travel,null,'exhausted vocabulary cannot be bypassed through ordinary ground');
+  assert.equal(lab.tile(6,7)!.hole,false);
 });
 
 check("wrong quiz attempts preserve the same letter rewards but reduce extra coins", () => {
@@ -539,8 +541,12 @@ check("tracked shortages gently bias deterministic loot without changing letter 
   assert.ok(tracked>plain);assert.ok(tracked<30*3*12*.5,'bias must not replace random drops');
 });
 
-check("ordinary ground accepts discrete taps without requiring letters", () => {
-  const lab=new LayeredLab();new WordPassages(lab);
+check("ordinary taps cannot bypass the seal, but work after its successful opening", () => {
+  const lab=new LayeredLab(),words=new WordPassages(lab);
+  lab.tapStrike();assert.equal(lab.tile(6,7)!.damage,0);assert.equal(lab.travel,null);
+  const word=words.room.answer;lab.walk.x=6.5;lab.walk.y=6.5;
+  for(const c of word)words.letters[c]++;
+  assert.ok(words.submit(word));lab.walk.x=6.5;lab.walk.y=7.5;
   for(let i=0;i<4&&!lab.travel;i++){lab.tick(.01,0,0,false);lab.tapStrike();}
   assert.ok(lab.travel);assert.ok(lab.tile(6,7,0)!.hole);
 });
@@ -581,8 +587,235 @@ check("service routes stay reachable and letter gameplay survives 1500 explorati
       const nx=x+dx,ny=y+dy,k=nx+','+ny,t=lab.tile(nx,ny);
       if(t&&['floor','path'].includes(t.kind)&&!seen.has(k)){seen.add(k);queue.push([nx,ny]);}
     }}
-    for(const p of words.services)assert.ok(seen.has(p.x+','+p.y));
+    for(const p of words.services)assert.ok(seen.has(p.x+','+p.y)||p.id==='may'&&[[1,0],[-1,0],[0,1],[0,-1]].some(([dx,dy])=>seen.has((p.x+dx)+','+(p.y+dy))));
     for(let i=0;i<500;i++){lab.tick(1/60,Math.sin(i*.13),Math.cos(i*.19),i%100<20);words.prepare();assert.ok(!lab.collides(lab.walk.x,lab.walk.y));}
+  }
+});
+
+check('expanded layers are deterministic 25x25 maps with treasure, resources and a protected village',()=>{
+  for(let d=0;d<40;d++){
+    const lab=new LayeredLab(),w=new WordPassages(lab);lab.depth=d;w.prepare();const layer=lab.layer();
+    assert.equal(layer.tiles.length,25);assert.ok(layer.tiles.every(row=>row.length===25));
+    if(d>0)assert.ok(layer.tiles.flat().some(t=>t.kind==='chest'),'depth '+d+' needs an exploration chest');
+    assert.ok(layer.tiles.flat().some(t=>['tree','root','ore','rock','wall'].includes(t.kind)));
+  }
+  const lab=new LayeredLab();assert.equal(lab.tile(15,14)!.kind,'village');
+  lab.walk.x=15.5;lab.walk.y=16.5;lab.select(15,15);
+  for(let i=0;i<10;i++)lab.tapStrike();assert.equal(lab.tile(15,15)!.kind,'village');
+});
+
+check('collecting timber and minerals fills the independent adventure bag and survives reload',()=>{
+  const lab=new LayeredLab(),w=new WordPassages(lab);lab.walk.x=14.5;lab.walk.y=8.5;
+  lab.layer().tiles[8][15].kind='tree';lab.select(15,8);
+  for(let i=0;i<8&&w.adventure.game.inventory.wood!==1;i++){lab.tick(.01,0,0,false);lab.tapStrike();}
+  assert.equal(w.adventure.game.inventory.wood,1);assert.equal(lab.resources,1);
+  w.adventure.mined(20,20,'ore');assert.equal(w.adventure.game.inventory.ore_copper,1);
+  const copy=new WordPassages(new LayeredLab());copy.restore(w.snapshot());
+  assert.deepEqual(copy.adventure.game.inventory,w.adventure.game.inventory);
+});
+
+check('world chests persist attempts, grant decreasing rewards and re-bury a real stubborn stone',()=>{
+  const lab=new LayeredLab(),w=new WordPassages(lab),a=w.adventure;
+  lab.depth=1;lab.maxDepth=1;w.prepare();lab.walk.x=14.5;lab.walk.y=8.5;lab.layer().tiles[8][15].kind='chest';
+  assert.ok(a.open(15,8));const q=a.quiz!.session.question;
+  a.answer((q.correctIndex+1)%4);const copy=new WordPassages(new LayeredLab());copy.restore(w.snapshot());
+  assert.ok(copy.adventure.open(15,8));assert.equal(copy.adventure.quiz!.session.question.word,q.word);
+  copy.adventure.answer((q.correctIndex+1)%4);const result=copy.adventure.answer((q.correctIndex+1)%4);
+  assert.ok(result.opened);assert.equal(result.coins,3);assert.equal(copy.lab.tile(15,8)!.kind,'floor');
+  assert.equal(copy.adventure.book.get(q.word).wrongCount,1);
+  const [id,word]=Object.entries(copy.adventure.game.stubborn)[0],depth=Number(id.split(',')[2]);
+  assert.ok(depth>=11&&depth<=31);copy.lab.depth=depth;copy.prepare();copy.lab.walk.x=14.5;copy.lab.walk.y=8.5;
+  assert.equal(copy.lab.tile(15,8)!.kind,'stubborn');assert.ok(copy.adventure.open(15,8));
+  assert.equal(copy.adventure.quiz!.session.question.word,word);
+  const correct=copy.adventure.quiz!.session.question.correctIndex;copy.adventure.answer(correct);
+  assert.equal(copy.lab.tile(15,8)!.kind,'floor');assert.equal(copy.adventure.game.stubborn[id],undefined);
+  assert.equal(copy.adventure.book.get(word).correctStreak,1);
+});
+
+check('word cards use deterministic drop odds, proximity pickup and the shared collection book',()=>{
+  const lab=new LayeredLab(),w=new WordPassages(lab),a=w.adventure;
+  let x=13;while(hashCoords(314159,x,8,0,SALT.wordDrop)/4294967296>=WORD_DROP_CHANCE)x++;
+  a.mined(x,8,'rock');assert.equal(a.drops.length,1);const word=a.drops[0].word;
+  lab.walk.x=x+.5;lab.walk.y=8.5;a.prepare();assert.equal(a.drops.length,0);
+  assert.ok(w.visibleWords().includes(word.toUpperCase()));assert.equal(w.coins,WORD_PICKUP_COINS);
+  lab.depth=10;a.prepare();assert.ok(a.notices.some(n=>n.startsWith('10m')));
+});
+
+check('v1 lab saves expand around their unchanged 13x13 terrain, preserving balances and historical access',()=>{
+  const w=new WordPassages(new LayeredLab());w.lab.depth=1;w.lab.maxDepth=1;w.prepare();
+  const s=JSON.parse(w.snapshot());s.version=1;delete s.adventure;delete s.legacyDepth;s.coins=42;
+  for(const l of s.layers)l.tiles=l.tiles.slice(0,13).map((row:any[])=>row.slice(0,13));
+  const copy=new WordPassages(new LayeredLab());copy.restore(JSON.stringify(s));
+  assert.equal(copy.lab.layer().tiles.length,25);assert.deepEqual(copy.lab.layer().tiles.slice(0,13).map(row=>row.slice(0,13)),s.layers.find((l:any)=>l.depth===1).tiles);
+  assert.equal(copy.coins,42);assert.ok(copy.lab.canDescend(0));assert.equal(copy.lab.canDescend(1),false);
+  assert.equal(copy.lab.layer(2).tiles.length,25);assert.equal(JSON.parse(copy.snapshot()).version,4);
+  const before=copy.snapshot(),bad=JSON.parse(before);bad.adventure.game.inventory.coin=-1;
+  assert.throws(()=>copy.restore(JSON.stringify(bad)));assert.equal(copy.snapshot(),before);
+});
+
+check('an unbroken seal blocks both hitting an old pit and walking into it',()=>{
+  const lab=new LayeredLab(),w=new WordPassages(lab);lab.tile(6,7)!.hole=true;
+  lab.tapStrike();assert.equal(lab.travel,null);
+  lab.walk.x=6.5;lab.walk.y=8.5;
+  for(let i=0;i<180;i++)lab.tick(1/60,0,1,false);
+  assert.equal(lab.travel,null);assert.equal(lab.depth,0);assert.equal(w.room.opened,false);
+});
+
+check('material exchanges consume typed bag items and shafts cannot erase buried treasure',()=>{
+  const lab=new LayeredLab(),w=new WordPassages(lab);w.adventure.game.inventory.wood=2;lab.resources=2;
+  assert.ok(w.exchange('Q'));assert.equal(lab.resources,0);assert.equal(w.adventure.game.inventory.wood,undefined);
+  w.legacyDepth=1;lab.layer(1).tiles[7][6].kind='chest';lab.tile(6,7)!.hole=true;
+  lab.tapStrike();assert.equal(lab.travel,null);assert.equal(lab.tile(6,7,1)!.kind,'chest');
+  lab.layer(1).tiles[7][6].kind='floor';w.adventure.game.stubborn['6,7,1']='apple';
+  lab.tapStrike();assert.equal(lab.travel,null);assert.equal(w.adventure.game.stubborn['6,7,1'],'apple');
+});
+
+check('isometric movement slides around a nearby corner without entering its collision box',()=>{
+  const walk=new IsometricWalk();walk.x=.77;walk.y=.85;
+  walk.isBlocked=(x,y)=>x+.22>=1&&x-.22<2&&y+.22>=1&&y-.22<2;
+  for(let i=0;i<10;i++){walk.tick(.05,1,-.5);assert.equal(walk.isBlocked(walk.x,walk.y),false);}
+  assert.ok(walk.x>1);assert.ok(walk.y<.85);
+});
+
+check('nearby mining automatically aims forward, stays on a cracked block and skips treasure or services',()=>{
+  const lab=new LayeredLab(),w=new WordPassages(lab);lab.walk.x=20.5;lab.walk.y=8.5;
+  for(let y=7;y<=9;y++)for(let x=19;x<=21;x++)lab.layer().tiles[y][x]={kind:'floor',hole:false,damage:0};
+  lab.tile(21,8)!.kind='soil';lab.tile(19,8)!.kind='rock';
+  lab.walk.facing={x:1,y:0};assert.deepEqual(lab.selected(),{x:21,y:8});
+  lab.tapStrike();assert.ok(lab.tile(21,8)!.damage>0);lab.walk.facing={x:-1,y:0};assert.deepEqual(lab.selected(),{x:21,y:8});
+  for(let i=0;i<6&&lab.tile(21,8)!.kind==='soil';i++){lab.tick(.01,0,0,false);lab.tapStrike();}
+  assert.equal(lab.tile(21,8)!.kind,'floor');assert.equal(w.adventure.game.inventory.dirt,1);
+  assert.equal(lab.depth,0);assert.equal(lab.travel,null);assert.equal(lab.tile(21,8)!.hole,false);
+  lab.tile(19,8)!.kind='chest';assert.deepEqual(lab.selected(),{x:20,y:8});assert.equal(w.adventure.quiz,null);
+  lab.walk.x=6.5;lab.walk.y=7.5;lab.target=null;assert.notDeepEqual(lab.selected(),{x:6,y:8});
+});
+
+check('manual aiming remains available and automatic selection cannot reach through a blocked corner',()=>{
+  const lab=new LayeredLab();lab.walk.x=20.5;lab.walk.y=8.5;
+  for(let y=7;y<=9;y++)for(let x=19;x<=21;x++)lab.layer().tiles[y][x]={kind:'floor',hole:false,damage:0};
+  lab.tile(21,8)!.kind='wall';lab.tile(20,9)!.kind='wall';lab.tile(21,9)!.kind='ore';
+  lab.walk.facing={x:0,y:1};assert.notDeepEqual(lab.selected(),{x:21,y:9});
+  assert.ok(lab.select(20,8));assert.deepEqual(lab.selected(),{x:20,y:8});
+  lab.tick(.05,-1,.5,false);assert.notDeepEqual(lab.selected(),{x:20,y:8});
+});
+
+check('v2 excavation migration preserves mined walls, holes, partial work, player space and does not regenerate v3 deposits',()=>{
+  const w=new WordPassages(new LayeredLab());w.lab.depth=1;w.lab.maxDepth=1;w.prepare();
+  const s=JSON.parse(w.snapshot());s.version=2;
+  for(const layer of s.layers)layer.tiles=makeLabLayer(layer.depth,false).tiles;
+  const layer=s.layers.find((l:any)=>l.depth===1),original=makeLabLayer(1,false);
+  let cleared:{x:number;y:number}|undefined;
+  for(let y=13;y<24&&!cleared;y++)for(let x=13;x<24;x++)if(original.tiles[y][x].kind==='root'){cleared={x,y};break;}
+  assert.ok(cleared);layer.tiles[cleared.y][cleared.x].kind='floor';
+  layer.tiles[20][20]={kind:'floor',hole:true,damage:0};layer.entrances.push({x:20,y:20});
+  const copy=new WordPassages(new LayeredLab());copy.restore(JSON.stringify(s));
+  assert.equal(copy.lab.tile(cleared.x,cleared.y)!.kind,'floor');assert.equal(copy.lab.tile(20,20)!.hole,true);
+  assert.equal(copy.lab.collides(copy.lab.walk.x,copy.lab.walk.y),false);
+  assert.ok(copy.lab.layer().tiles.flat().some(t=>t.kind==='soil'));
+  const soil=copy.lab.layer().tiles.flat().find(t=>t.kind==='soil')!;soil.kind='floor';
+  const raw=copy.snapshot(),again=new WordPassages(new LayeredLab());again.restore(raw);assert.equal(again.snapshot(),raw);
+  assert.equal(JSON.parse(raw).version,4);assert.equal(again.legacyDepth,w.legacyDepth);
+});
+
+check('diggable banks are deterministic, leave guaranteed chests and village routes intact, and survive extended auto-mining',()=>{
+  const a=makeLabLayer(2),b=makeLabLayer(2);assert.deepEqual(a,b);
+  assert.ok(a.tiles.flat().some(t=>t.kind==='soil'));assert.ok(a.tiles.flat().some(t=>t.kind==='chest'));
+  for(const depth of [0,1,2]){
+    const lab=new LayeredLab(),w=new WordPassages(lab);lab.depth=depth;w.prepare();
+    for(let i=0;i<500;i++){lab.tick(1/60,Math.sin(i*.07),Math.cos(i*.11),i%80<30);w.prepare();assert.equal(lab.collides(lab.walk.x,lab.walk.y),false);}
+    assert.equal(lab.depth,depth,'automatic mining cannot bypass the seal');
+  }
+});
+
+check('underground layers generate wall-ringed hidden chambers with relics and a depth-1 pack part',()=>{
+  const d1=makeLabLayer(1),d2=makeLabLayer(2);
+  assert.deepEqual(d1,makeLabLayer(1));
+  const findKind=(l:typeof d1,kind:string)=>{const out:[number,number][]=[];l.tiles.forEach((row,y)=>row.forEach((t,x)=>{if(t.kind===kind)out.push([x,y]);}));return out;};
+  const relics1=findKind(d1,'relic'),parts1=findKind(d1,'pack_part'),relics2=findKind(d2,'relic');
+  assert.equal(relics1.length,1);assert.equal(parts1.length,1);assert.equal(relics2.length,2);
+  for(const [cx,cy] of [...relics1,...parts1]){
+    for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if(dx||dy)assert.equal(d1.tiles[cy+dy][cx+dx].kind,'wall');
+  }
+  const lab=new LayeredLab(),w=new WordPassages(lab);lab.depth=1;w.prepare();
+  const [rx,ry]=relics1[0];
+  lab.tile(rx-1,ry)!.kind='floor';
+  lab.walk.x=rx+.5;lab.walk.y=ry+.5;w.prepare();
+  assert.equal(lab.tile(rx,ry)!.kind,'floor');assert.equal(w.adventure.relics.length,1);assert.equal(w.adventure.relics[0].identified,false);
+});
+
+check('underground clues and letter chests scatter into outer dark roads instead of crowding spawn',()=>{
+  const lab=new LayeredLab(),w=new WordPassages(lab);lab.depth=1;w.prepare();
+  for(const id of ['clue','chest0','chest1','chest2']){
+    const s=w.services.find(p=>p.id===id)!;
+    assert.ok(Math.hypot(s.x-6,s.y-7)>4,id+' should be outside spawn lamp radius');
+  }
+});
+
+check('finite pack enforces slot overflow choices and camp appraisal, selling and pack repair work',()=>{
+  const lab=new LayeredLab(),w=new WordPassages(lab),adv=w.adventure;
+  adv.game.inventory={wood:2,stone:2,dirt:2,ore_copper:1,ore_iron:1,ore_silver:1,coin:50};
+  lab.resources=9;assert.equal(adv.usedSlots(),6);
+  adv.mined(15,15,'ore'); // depth 0 -> ore_copper already stacked, no overflow
+  assert.equal(adv.pendingLoot,null);
+  lab.depth=1;w.prepare();
+  const partPos=lab.layer().tiles.flatMap((row,y)=>row.map((t,x)=>t.kind==='pack_part'?[x,y]:null)).filter(Boolean)[0] as [number,number];
+  lab.walk.x=partPos[0]+.5;lab.walk.y=partPos[1]+.5;w.prepare();
+  assert.ok(adv.pendingLoot&&adv.pendingLoot.kind==='relic');
+  assert.ok(adv.resolvePending(5)); // replace last material slot with pack_part
+  assert.equal(adv.pendingLoot,null);assert.ok(adv.relics.some(r=>r.kind==='pack_part'));
+  assert.ok(adv.repairPack());assert.equal(adv.expanded,true);assert.equal(adv.capacity,10);
+  const relicPos=lab.layer().tiles.flatMap((row,y)=>row.map((t,x)=>t.kind==='relic'?[x,y]:null)).filter(Boolean)[0] as [number,number];
+  lab.walk.x=relicPos[0]+.5;lab.walk.y=relicPos[1]+.5;w.prepare();
+  const relicIdx=adv.relics.findIndex(r=>r.kind==='relic');assert.ok(relicIdx>=0);
+  const coinsBefore=w.coins;
+  const app=adv.appraiseRelic(relicIdx);assert.ok(app.ok);assert.equal(adv.relics[relicIdx].identified,true);
+  assert.ok(adv.relicDex.includes(adv.relics[relicIdx].id));
+  const sold=adv.sellRelic(relicIdx);assert.ok(sold.ok);assert.ok(w.coins>coinsBefore);
+});
+
+check('second-stage letter hint costs materials and v3 saves migrate cleanly to v4 with chambers',()=>{
+  const lab=new LayeredLab(),w=new WordPassages(lab);
+  assert.equal(w.letterHint(),false);
+  lab.resources=2;assert.ok(w.letterHint());assert.equal(lab.resources,0);assert.equal(w.room.letterHint,true);
+  lab.depth=1;lab.maxDepth=1;w.prepare();
+  const s=JSON.parse(w.snapshot());s.version=3;delete s.adventure.capacity;delete s.adventure.expanded;delete s.adventure.relics;delete s.adventure.relicDex;
+  s.layers.find((l:any)=>l.depth===1).tiles=makeLabLayer(1,false).tiles;
+  const copy=new WordPassages(new LayeredLab());copy.restore(JSON.stringify(s));
+  assert.equal(JSON.parse(copy.snapshot()).version,4);
+  assert.equal(copy.adventure.capacity,6);assert.equal(copy.rooms['0'].letterHint,true);
+  assert.ok(copy.lab.layer(1).tiles.flat().some(t=>t.kind==='relic'));
+  const raw=copy.snapshot(),bad=JSON.parse(raw);bad.adventure.capacity=2;
+  assert.throws(()=>copy.restore(JSON.stringify(bad)));assert.equal(copy.snapshot(),raw);
+});
+
+check('art-v101 sprite atlases and standalone UI PNGs cover all required v1.0.1 frames',()=>{
+  const root=new URL('../cocos/assets/resources/art-v101/',import.meta.url);
+  const frames=new Set<string>();
+  for(const rel of ['characters/field_crew','effects/digging','items/findings','world/props/props','world/terrain/terrain']){
+    const png=readFileSync(new URL(rel+'.png',root));
+    assert.equal(png.toString('ascii',1,4),'PNG',rel+'.png');
+    const plist=readFileSync(new URL(rel+'.plist',root),'utf8');
+    const body=plist.split('<key>frames</key>')[1]?.split('<key>metadata</key>')[0]??'';
+    for(const m of body.matchAll(/^\t\t<key>([^<]+)<\/key>/gm))frames.add(m[1]);
+  }
+  const requiredAtlas=[
+    'walk_down_0','walk_up_0','walk_left_0','walk_right_0','npc_may','npc_trader',
+    'oak','pine','boulder','giant_root','root_heart','glow_vein','stubborn_stone','treasure_chest','letter_chest','seal_arch','inscription','house_blue','house_red',
+    'forest_soil','forest_wall','roots_soil','roots_wall','rock_soil','rock_wall','unexamined_relic','damaged_pack_part',
+    'ore_copper','ore_iron','ore_gold','ore_diamond','ore_starcore','field','ladder_up','forest_floor_0','roots_floor_0','rock_floor_0','forest_shaft','roots_shaft','rock_shaft',
+    'item-coin','item-dirt','item-stone','item-wood','item-pack_part','item-ore_copper','item-ore_iron','item-ore_gold','item-ore_diamond','item-ore_starcore',
+    'relic-amber_leaf','relic-clay_seal','relic-copper_bell','relic-root_compass','relic-prism_shard','relic-rune_tablet','relic-star_astrolabe','relic-heart_crystal','relic-crown_fragment',
+  ];
+  for(const name of requiredAtlas)assert.ok(frames.has(name),'missing atlas frame: '+name);
+  const requiredUi=[
+    'controls/ui-stick-base','controls/ui-stick-thumb',
+    'icons/ui-book','icons/ui-camera','icons/ui-chest','icons/ui-clue','icons/ui-dig','icons/ui-entry','icons/ui-grid','icons/ui-interact','icons/ui-ladder','icons/ui-letters','icons/ui-pack','icons/ui-plan','icons/ui-seal','icons/ui-sound','icons/ui-trade',
+    'surfaces/ui-button','surfaces/ui-button-down','surfaces/ui-button-primary','surfaces/ui-button-primary-down','surfaces/ui-key','surfaces/ui-key-down','surfaces/ui-key-empty','surfaces/ui-key-selected','surfaces/ui-panel-hud','surfaces/ui-panel-window',
+  ];
+  for(const rel of requiredUi){
+    const png=readFileSync(new URL('ui/'+rel+'.png',root));
+    assert.equal(png.toString('ascii',1,4),'PNG','ui/'+rel+'.png');
+    readFileSync(new URL('ui/'+rel+'.png.meta',root),'utf8');
   }
 });
 

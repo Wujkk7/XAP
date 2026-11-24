@@ -1,47 +1,72 @@
-import type { LayeredLab, LabLayer } from './LayeredLab.ts';
+import { LayeredLab, makeLabLayer, addLabExcavations, addLabChambers } from './LayeredLab.ts';
+import type { LabLayer } from './LayeredLab.ts';
 import { hashCoords } from './rng.ts';
 import { ChestSession } from './quiz.ts';
 import { WORDS_TIER1 } from './vocab.ts';
 import { PASSAGE_WORDS } from '../data/external-files/PassageWords.ts';
 import { LETTERS, LETTER_WEIGHTS, LAB_WORD_RULES as RULE, LAB_SERVICES } from '../data/constants/WordPassageRules.ts';
+import { LabAdventure } from './LabAdventure.ts';
+import { LAB_VILLAGE } from '../data/external-files/LabVillage.ts';
+import { LAB_MAP_SIZE } from '../data/constants/IsometricRules.ts';
 
-export interface WordLayer { answer: string; discovered: boolean; learned: boolean; hint: boolean; opened: boolean; chests: number[]; attempts: number[] }
+export interface WordLayer { answer: string; discovered: boolean; learned: boolean; hint: boolean; letterHint?: boolean; opened: boolean; chests: number[]; attempts: number[] }
 export class WordPassages {
   letters: Record<string, number> = Object.fromEntries(Array.from(LETTERS, c => [c, 0]));
   seen: string[] = [];
   correct: Record<string, number> = {};
   rooms: Record<string, WordLayer> = {};
   tracked = '';
-  coins = 0;
+  adventure: LabAdventure;
+  legacyDepth = 0;
+  get coins():number{return this.adventure.game.inventory.coin??0;}
+  set coins(value:number){if(value)this.adventure.game.inventory.coin=value;else delete this.adventure.game.inventory.coin;}
   private drops = 0;
   lab: LayeredLab;
   constructor(lab: LayeredLab) {
     this.lab = lab;
-    lab.canStrike = (x, y) => !this.serviceAt(x, y);
+    this.adventure=new LabAdventure(lab);
+    lab.canStrike = (x, y) => {if(this.adventure.open(x,y))return false;return !this.serviceAt(x,y);};
+    lab.canDescend=d=>d<this.legacyDepth||!!this.rooms[String(d)]?.opened;
+    lab.canLand=(x,y,d)=>!this.adventure.game.stubborn[x+','+y+','+d];
+    lab.canAutoTarget=(x,y)=>!this.serviceAt(x,y);
     this.prepare();
   }
   get services(): { id: string; x: number; y: number; title: string }[] {
-    return LAB_SERVICES.map(p => ({ ...p, y: p.id === 'seal' && this.lab.depth % 2 ? 4 : p.y }));
+    const d = this.lab.depth;
+    if (d === 0) {
+      const services = LAB_SERVICES.map(p => ({ ...p })) as { id: string; x: number; y: number; title: string }[];
+      if (this.lab.layer().tiles.length > 13) services.push({ id: 'may', x: LAB_VILLAGE.npc.x, y: LAB_VILLAGE.npc.y, title: LAB_VILLAGE.npc.name });
+      return services;
+    }
+    // Underground: keep seal + merchant near entry as goals; scatter clue & chests along outer dark roads to drive real exploration.
+    return [
+      { id: 'seal', x: 6, y: d % 2 ? 4 : 5, title: '符文通道' },
+      { id: 'npc', x: 7, y: 6, title: '兑换商人' },
+      { id: 'clue', x: d % 2 ? 16 : 6, y: d % 2 ? 6 : 16, title: '线索碑' },
+      { id: 'chest0', x: 14, y: 6, title: '字母宝箱' },
+      { id: 'chest1', x: 6, y: 18, title: '字母宝箱' },
+      { id: 'chest2', x: 16, y: 16, title: '字母宝箱' },
+    ];
   }
   prepare(): WordLayer {
     const depth = this.lab.depth, id = String(depth);
     if (!this.rooms[id]) {
-      const available = PASSAGE_WORDS.filter(w => !this.seen.includes(w.word) && !Object.values(this.rooms).some(r => r.answer === w.word));
+      const available = PASSAGE_WORDS.filter(w => !Object.values(this.rooms).some(r => r.answer === w.word));
       const themed = available.filter(w => w.theme === this.lab.layer().theme), pool = themed.length ? themed : available;
       const answer = pool.length ? pool[hashCoords(314159, 6, 5, depth, 601) % pool.length].word : '';
-      this.rooms[id] = { answer, discovered: false, learned: false, hint: false, opened: false, chests: [], attempts: [0, 0, 0] };
+      this.rooms[id] = { answer, discovered: false, learned: false, hint: false, letterHint: false, opened: false, chests: [], attempts: [0, 0, 0] };
       const layer = this.lab.layer();
-      for (const p of this.services) if (!layer.tiles[p.y][p.x].hole && !layer.entrances.some(e => e.x === p.x && e.y === p.y)) layer.tiles[p.y][p.x] = { kind: 'path', hole: false, damage: 0 };
+      for (const p of this.services) if (p.id!=='may'&&!layer.tiles[p.y][p.x].hole && !layer.entrances.some(e => e.x === p.x && e.y === p.y)) layer.tiles[p.y][p.x] = { kind: 'path', hole: false, damage: 0 };
       layer.revision++;
     }
-    return this.rooms[id];
+    this.adventure.prepare();return this.rooms[id];
   }
   get room(): WordLayer { return this.prepare(); }
   serviceAt(x: number, y: number): typeof this.services[number] | undefined {
     const p = this.services.find(s => s.x === x && s.y === y);
     if (!p) return;
     const room = this.rooms[String(this.lab.depth)];
-    if (!room || this.lab.layer().entrances.some(e => e.x === x && e.y === y) || this.lab.tile(x,y)?.hole || (p.id === 'seal' && (!room.answer || room.opened)) || (p.id.startsWith('chest') && room.chests.includes(Number(p.id.slice(-1))))) return;
+    if (!room || this.lab.layer().entrances.some(e => e.x === x && e.y === y) || this.lab.tile(x,y)?.hole || this.lab.tile(x,y)?.kind==='stubborn' || (p.id === 'seal' && (!room.answer || room.opened)) || (p.id.startsWith('chest') && room.chests.includes(Number(p.id.slice(-1))))) return;
     return p;
   }
   nearby(): typeof this.services[number] | undefined {
@@ -51,7 +76,7 @@ export class WordPassages {
   }
   discover(): void { const r = this.room; r.discovered = true; this.markSeen(r.answer); }
   private markSeen(word: string): void { if (word && !this.seen.includes(word)) this.seen.push(word); }
-  clue(): string { return PASSAGE_WORDS.find(w => w.word === this.room.answer)?.clue ?? '本主题词库已探索完，普通砸地仍可下潜。'; }
+  clue(): string { return PASSAGE_WORDS.find(w => w.word === this.room.answer)?.clue ?? '新词库已探索完，暂不开放更深层；可返回已探索区域。'; }
   available(letter: string, draft = ''): number { return (this.letters[letter] ?? 0) - Array.from(draft).filter(c => c === letter).length; }
   needs(word = this.tracked): Record<string, number> {
     const counts: Record<string, number> = {};
@@ -60,11 +85,17 @@ export class WordPassages {
     return counts;
   }
   track(word: string): boolean { if (!/^[A-Z]{1,16}$/.test(word)) return false; this.tracked = word; return true; }
-  hint(): boolean { if (this.room.hint) return true; if (this.lab.resources < RULE.hintCost) return false; this.lab.resources -= RULE.hintCost; this.room.hint = true; return true; }
+  hint(): boolean { if (this.room.hint) return true; if (this.lab.resources < RULE.hintCost) return false; this.lab.resources -= RULE.hintCost;this.adventure.consumeMaterials(RULE.hintCost); this.room.hint = true; return true; }
+  letterHint(): boolean {
+    if (this.room.letterHint) return true;
+    if (!this.room.answer || this.lab.resources < RULE.letterHintCost) return false;
+    this.lab.resources -= RULE.letterHintCost; this.adventure.consumeMaterials(RULE.letterHintCost);
+    this.room.letterHint = true; return true;
+  }
   learn(): string { this.room.learned = true; this.markSeen(this.room.answer); return this.observation(); }
   observation(): string { return PASSAGE_WORDS.find(w => w.word === this.room.answer)?.observation ?? '没有新的刻痕。'; }
   visibleWords(): string[] {
-    return this.seen.filter(w => !Object.values(this.rooms).some(r => r.answer === w && !r.opened));
+    return [...new Set([...this.seen,...this.adventure.game.seenWords.map(w=>w.toUpperCase())])].filter(w => !Object.values(this.rooms).some(r => r.answer === w && !r.opened));
   }
   cost(letter: string): number { return 'JQXZKV'.includes(letter) ? RULE.rareCost : RULE.commonCost; }
   exchange(letter: string, source?: string): boolean {
@@ -75,7 +106,7 @@ export class WordPassages {
       if (this.letters[source] < count) return false;
       this.letters[source] -= count;
     } else {
-      const count = this.cost(letter); if (this.lab.resources < count) return false; this.lab.resources -= count;
+      const count = this.cost(letter); if (this.lab.resources < count) return false; this.lab.resources -= count;this.adventure.consumeMaterials(count);
     }
     this.letters[letter]++; return true;
   }
@@ -93,6 +124,10 @@ export class WordPassages {
     let letters = '';
     if (result.opened) {
       this.room.chests.push(index); this.coins += Math.round(RULE.chestCoins * result.rewardMultiplier);
+      this.lab.layer().revision++;
+      const p=this.services.find(p=>p.id==='chest'+index)!;
+      this.adventure.record(session.question.word,result.correct,p.x,p.y,this.lab.depth);
+      this.lab.effects.push({kind:'chest',x:p.x,y:p.y,depth:this.lab.depth});
       for (let i = 0; i < RULE.chestLetters; i++) {
         const h = hashCoords(314159, index, this.drops++, this.lab.depth, 614), needed = Object.keys(this.needs());
         const c = needed.length && (h % 1000) / 1000 < RULE.shortageChance ? needed[h % needed.length] : LETTER_WEIGHTS[h % LETTER_WEIGHTS.length];
@@ -108,26 +143,27 @@ export class WordPassages {
     if (Math.hypot(p.x + 0.5 - this.lab.walk.x, p.y + 0.5 - this.lab.walk.y) > 1.65) return false;
     for (const c of word) this.letters[c]--;
     this.correct[word] = (this.correct[word] ?? 0) + 1; r.opened = true;
+    this.adventure.record(word,true,p.x,p.y,this.lab.depth);
     this.lab.openPassage(p.x, p.y); return true;
   }
   snapshot(): string {
-    return JSON.stringify({ version: 1, depth: this.lab.depth, maxDepth: this.lab.maxDepth, resources: this.lab.resources, x: this.lab.walk.x, y: this.lab.walk.y,
-      layers: Array.from(this.lab.layers.values()), letters: this.letters, seen: this.seen, correct: this.correct, rooms: this.rooms, tracked: this.tracked, coins: this.coins, drops: this.drops });
+    return JSON.stringify({ version: 4, depth: this.lab.depth, maxDepth: this.lab.maxDepth, resources: this.lab.resources, x: this.lab.walk.x, y: this.lab.walk.y,
+      layers: Array.from(this.lab.layers.values()), letters: this.letters, seen: this.seen, correct: this.correct, rooms: this.rooms, tracked: this.tracked, coins: this.coins, drops: this.drops, legacyDepth:this.legacyDepth, adventure:this.adventure.snapshot() });
   }
   restore(raw: string): void {
     const s = JSON.parse(raw), integer = (v: unknown, max = 1000000): boolean => Number.isInteger(v) && Number(v) >= 0 && Number(v) <= max;
-    if (!s || s.version !== 1 || !integer(s.depth, 10000) || !integer(s.maxDepth, 10000) || s.maxDepth < s.depth || !integer(s.resources) || !integer(s.coins) || !integer(s.drops) || !Number.isFinite(s.x) || !Number.isFinite(s.y)) throw Error('实验存档头部无效');
+    if (!s || ![1,2,3,4].includes(s.version) || !integer(s.depth, 10000) || !integer(s.maxDepth, 10000) || s.maxDepth < s.depth || !integer(s.resources) || !integer(s.coins) || !integer(s.drops) || !Number.isFinite(s.x) || !Number.isFinite(s.y)) throw Error('实验存档头部无效');
     const record = (v: unknown) => v !== null && typeof v === 'object' && !Array.isArray(v);
     if (!Array.isArray(s.layers) || !s.layers.length || s.layers.length > 10002 || !record(s.rooms) || !record(s.letters) || !record(s.correct)) throw Error('实验存档结构无效');
     const layers = new Map<number, LabLayer>();
-    const kinds = ['floor','path','water','tree','rock','root','ore','wall'];
+    const kinds = ['floor','path','water','tree','rock','root','ore','wall','soil','chest','stubborn','village','relic','pack_part'];
     for (const l of s.layers) {
-      if (!integer(l.depth, 10001) || layers.has(l.depth) || l.theme !== Math.min(l.depth, 2) || !integer(l.revision) || !Array.isArray(l.tiles) || l.tiles.length !== 13 || !Array.isArray(l.entrances)) throw Error('地层无效');
+      if (!integer(l.depth, 10001) || layers.has(l.depth) || l.theme !== Math.min(l.depth, 2) || !integer(l.revision) || !Array.isArray(l.tiles) || ![13,LAB_MAP_SIZE].includes(l.tiles.length) || !Array.isArray(l.entrances)) throw Error('地层无效');
       for (const row of l.tiles) {
-        if (!Array.isArray(row) || row.length !== 13) throw Error('网格无效');
+        if (!Array.isArray(row) || row.length !== l.tiles.length) throw Error('网格无效');
         for (const t of row) if (!t || !kinds.includes(t.kind) || typeof t.hole !== 'boolean' || !Number.isFinite(t.damage) || t.damage < 0 || t.damage > 1 || (t.hole && !['floor','path'].includes(t.kind))) throw Error('地块无效');
       }
-      for (const p of l.entrances) if (!p || !integer(p.x, 12) || !integer(p.y, 12)) throw Error('入口无效');
+      for (const p of l.entrances) if (!p || !integer(p.x, l.tiles.length-1) || !integer(p.y, l.tiles.length-1)) throw Error('入口无效');
       layers.set(l.depth, l);
     }
     if (!layers.has(s.depth)) throw Error('当前层缺失');
@@ -139,7 +175,8 @@ export class WordPassages {
     for (const [d,r] of Object.entries(s.rooms) as [string,WordLayer][]) {
       if (!/^\d+$/.test(d) || !layers.has(Number(d)) || !r || typeof r.answer !== 'string' || (r.answer && (!PASSAGE_WORDS.some(w => w.word === r.answer) || answers.has(r.answer)))) throw Error('通道词无效');
       if (r.answer) answers.add(r.answer);
-      if (['discovered','learned','hint','opened'].some(k => typeof (r as unknown as Record<string,unknown>)[k] !== 'boolean') || !Array.isArray(r.chests) || new Set(r.chests).size !== r.chests.length || r.chests.some(n => !integer(n,2)) || !Array.isArray(r.attempts) || r.attempts.length !== 3 || r.attempts.some(n => !integer(n,3))) throw Error('通道状态无效');
+      if (['discovered','learned','hint','opened'].some(k => typeof (r as unknown as Record<string,unknown>)[k] !== 'boolean') || (r.letterHint !== undefined && typeof r.letterHint !== 'boolean') || !Array.isArray(r.chests) || new Set(r.chests).size !== r.chests.length || r.chests.some(n => !integer(n,2)) || !Array.isArray(r.attempts) || r.attempts.length !== 3 || r.attempts.some(n => !integer(n,3))) throw Error('通道状态无效');
+      r.letterHint = Boolean(r.letterHint);
       for (let i = 0; i < 3; i++) if (r.attempts[i] === 3 && !r.chests.includes(i)) throw Error('宝箱状态冲突');
       if (r.opened && !layers.get(Number(d))!.tiles[Number(d)%2 ? 4 : 5][6].hole) throw Error('通道状态冲突');
     }
@@ -148,8 +185,25 @@ export class WordPassages {
     for (const [d,r] of Object.entries(s.rooms) as [string,WordLayer][]) if (!r.opened) layers.get(Number(d))!.tiles[Number(d)%2?4:5][6].damage=0;
     // Validate position against candidate tiles before replacing live state.
     const row = layers.get(s.depth)!.tiles, radius = 0.22;
-    if (s.x - radius < 0 || s.y - radius < 0 || s.x + radius >= 13 || s.y + radius >= 13) throw Error('位置越界');
-    for (let y = Math.floor(s.y-radius); y <= Math.floor(s.y+radius); y++) for (let x = Math.floor(s.x-radius); x <= Math.floor(s.x+radius); x++) if (!['floor','path'].includes(row[y][x].kind)) throw Error('位置嵌墙');
+    if (s.x - radius < 0 || s.y - radius < 0 || s.x + radius >= row.length || s.y + radius >= row.length) throw Error('位置越界');
+    for (let y = Math.floor(s.y-radius); y <= Math.floor(s.y+radius); y++) for (let x = Math.floor(s.x-radius); x <= Math.floor(s.x+radius); x++) if (!['floor','path','relic','pack_part'].includes(row[y][x].kind)) throw Error('位置嵌墙');
+    const candidate=new LabAdventure(new LayeredLab());
+    if(s.version>=2){if(!integer(s.legacyDepth,10000)||s.legacyDepth>s.maxDepth)throw Error('历史通行资格无效');candidate.restore(s.adventure);if((candidate.game.inventory.coin??0)!==s.coins)throw Error('金币记录冲突');}
+    for(const layer of layers.values())if(layer.tiles.length<LAB_MAP_SIZE){
+      const expanded=makeLabLayer(layer.depth);
+      for(let y=0;y<layer.tiles.length;y++)for(let x=0;x<layer.tiles.length;x++)expanded.tiles[y][x]=layer.tiles[y][x];
+      layer.tiles=expanded.tiles;layer.revision++;
+      if(layer.depth>0&&!layer.tiles.some(row=>row.some(t=>t.kind==='chest')))layer.tiles[20][20].kind='chest';
+    }
+    if(s.version<3)for(const layer of layers.values())addLabExcavations(layer,layer.depth===s.depth?{x:s.x,y:s.y}:undefined);
+    if(s.version<4){
+      const skipPart=candidate.expanded||candidate.relics.some(r=>r.kind==='pack_part');
+      for(const layer of layers.values())addLabChambers(layer,layer.depth===s.depth?{x:s.x,y:s.y}:undefined,skipPart);
+    }
+    this.adventure.game=candidate.game;this.adventure.book=candidate.book;this.adventure.chestRecords=candidate.chestRecords;
+    this.adventure.capacity=candidate.capacity;this.adventure.expanded=candidate.expanded;this.adventure.relics=candidate.relics;this.adventure.relicDex=candidate.relicDex;
+    this.adventure.quiz=null;this.adventure.drops=[];this.adventure.pendingLoot=null;
+    this.legacyDepth=s.version===1?s.maxDepth:s.legacyDepth;
     this.lab.layers = layers; this.lab.depth = s.depth; this.lab.maxDepth = s.maxDepth; this.lab.resources = s.resources;
     this.lab.walk.x = s.x; this.lab.walk.y = s.y; this.lab.walk.stop(); this.lab.target = null; this.lab.travel = null; this.lab.effects = [];
     this.letters = Object.fromEntries(Array.from(LETTERS, c => [c,s.letters[c]])); this.seen = s.seen; this.correct = s.correct;

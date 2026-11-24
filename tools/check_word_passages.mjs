@@ -98,8 +98,16 @@ try {
   await shot('word-exploration');
   await go(6.5,6.5,6,5);assert.equal(await evaluate('qa.root.wordUI.mode'),'seal');
   const answer=await evaluate('qa.root.words.room.answer');
+  const skin=await evaluate(`(()=>{
+    const {cc,root}=qa,panel=root.wordUI.panel,background=panel.getComponent(cc.Sprite);
+    const key=panel.getChildByName(root.words.room.answer[0]).getComponent(cc.Sprite);
+    return {panel:background.spriteFrame.name,sliced:background.type===cc.Sprite.Type.SLICED,
+      inset:background.spriteFrame.insetLeft,key:key.spriteFrame.name};
+  })()`);
+  assert.deepEqual(skin,{panel:'ui-panel-window',sliced:true,inset:14,key:'ui-key-empty'});
   await letter(answer[0]);assert.equal(await evaluate('qa.root.wordUI.draft'),'');
   await tap(-30,-284);assert.equal(await evaluate('qa.root.wordUI.mode'),'plan');
+  assert.equal(await evaluate("qa.root.wordUI.panel.getChildByName('Q').getComponent(qa.cc.Sprite).spriteFrame.name"),'ui-key');
   for(const c of answer)await letter(c);
   await tap(40,-284);assert.equal(await evaluate('qa.root.words.tracked'),answer);
   assert.equal(await evaluate('Object.values(qa.root.words.letters).reduce((a,b)=>a+b,0)'),0);
@@ -112,6 +120,9 @@ try {
   assert.equal(await evaluate('Object.values(qa.root.words.letters).reduce((a,b)=>a+b,0)'),12);
   assert.equal(await evaluate('qa.root.words.coins'),8);
   await shot('word-chest');await tap(0,-284);
+  await tap(-495,180);
+  assert.equal(await evaluate("qa.root.wordUI.panel.getChildByName('item-coin').getComponent(qa.cc.Sprite).spriteFrame.name"),'item-coin');
+  await tap(525,23);
 
   await go(5.5,7.5,5,6);assert.equal(await evaluate('qa.root.wordUI.mode'),'clue');
   assert.equal(await evaluate('qa.root.words.room.learned'),true);
@@ -148,8 +159,10 @@ try {
   assert.equal(await evaluate('qa.root.words.snapshot()'),saved);
   assert.equal(await evaluate('qa.root.words.room.opened'),true);
 
-  // Without answering or spending letters, an ordinary floor still reaches the next layer.
-  await tap(295,-281);await press();await until('qa.root.lab.depth===1','ordinary non-English descent');await release();
+  // After breaking this layer's seal, ordinary floors can use the unlocked connection.
+  await tap(295,-281);await press();await until('qa.root.lab.depth===1','ordinary descent after breaking the seal');await release();
+  await press();await delay(600);await release();
+  assert.equal(await evaluate('qa.root.lab.depth'),1,'next unbroken seal blocks deeper exploration');
   assert.ok(await evaluate('!qa.root.lab.collides(qa.root.walk.x,qa.root.walk.y)'));
   await send('Emulation.setDeviceMetricsOverride',{width:844,height:390,deviceScaleFactor:1,mobile:true});await delay(250);
   await tap(-125,286);await shot('word-phone-bag');await tap(-390,-284);await shot('word-phone-plan');
@@ -164,5 +177,5 @@ try {
   assert.equal(await evaluate('qa.root.preserveBadSave'),true);
   assert.ok(await evaluate('qa.root.saveError.includes("原档已保留")'));
   assert.equal(exceptions.length,0,JSON.stringify(exceptions));
-  console.log('PASS: real touch depleted keys, planning, tracking, quiz penalties with full letter rewards, clue discovery, targeted exchange, failed-word retention, immediate letter swings, atomic successful passage, down/up, full save reload, ordinary descent, mobile panels and formal-save isolation.');
+  console.log('PASS: real touch depleted keys, planning, tracking, quiz penalties with full letter rewards, clue discovery, targeted exchange, failed-word retention, immediate letter swings, atomic successful passage, down/up, full save reload, descent after seal and next-depth gating, mobile panels and formal-save isolation.');
 }finally{socket?.close();browser.kill();server.close();}

@@ -1,33 +1,40 @@
 import {
   _decorator, Component, Node, Canvas, Camera, UITransform, Graphics, Sprite, SpriteFrame,
-  Texture2D, Rect, Size, Vec2, Color, Label, Layers, UIOpacity, resources, view,
+  Texture2D, SpriteAtlas, Color, Label, Layers, UIOpacity, resources, view,
   ResolutionPolicy, input, Input, EventKeyboard, EventTouch, KeyCode, sys, game, Game, profiler,
 } from "cc";
 import { isoProject, isoUnproject } from "../core/Isometric";
 import { LayeredLab } from "../core/LayeredLab";
-import type { LabLayer, LabEffect } from "../core/LayeredLab";
+import type { LabEffect } from "../core/LayeredLab";
 import { LAB_THEMES } from "../data/external-files/IsometricLayers";
 import { ISOMETRIC_MAP as MAP } from "../data/external-files/IsometricMap";
 import { ISO_TILE_WIDTH as W, ISO_TILE_HEIGHT as H, ISO_OVERVIEW_ZOOM, ISO_FOLLOW_ZOOM, LAB_LAYER_GAP, LAB_TRAVEL_SECONDS, LAB_PARTICLE_CAP } from "../data/constants/IsometricRules";
-import { XPAA_REGIONS, WALK_CANVAS, walkFrame } from "../data/resource-config/XPAAArt";
+import { walkFrame } from "../data/resource-config/XPAAArt";
 import { UI_COLORS as C } from "../data/resource-config/TileStyles";
 import { occlusionAlpha } from "./ObliqueProjection";
 import { WordPassages } from "../core/WordPassages";
 import { WordPassageUI } from "./WordPassageUI";
+import { LabUISkin } from './LabUISkin';
 import { LAB_STORAGE_KEY } from "../data/player-data/LabSave";
 import { LAB_WORD_RULES } from "../data/constants/WordPassageRules";
 import { labBrightness, smoothBrightness } from "../core/LabLighting";
-import { LAB_LAMP } from "../data/constants/IsometricRules";
+import { LAB_LAMP, LAB_WORLD_SEED } from "../data/constants/IsometricRules";
+import { LAB_BLOCK_HEIGHT, LAB_WALL_HEIGHT, LAB_SOIL_HEIGHT } from '../data/constants/IsometricRules';
+import { LAB_VILLAGE } from '../data/external-files/LabVillage';
+import { STRATUM_TINT } from '../data/resource-config/ArtCatalog';
+import { hashCoords } from "../core/rng";
+import { stratumAt } from '../core/strata';
 
 const { ccclass } = _decorator;
-interface Actor { x: number; y: number; width: number; node: Node; sprite?: Sprite; opacity: UIOpacity; brightness?: number; paint?: (light: number) => void }
-interface LayerView { node: Node; actorsNode: Node; actors: Actor[]; grid: Graphics; fog: Graphics; brightness: Float32Array; revision: number; floors: Map<string, Node> }
+interface Actor { x: number; y: number; width: number; node: Node; sprite: Sprite; opacity: UIOpacity; brightness?: number }
+interface LayerView { node: Node; actorsNode: Node; actors: Actor[]; grid: Graphics; fog: Graphics; brightness: Float32Array; fogAlpha: Uint16Array; revision: number; floors: Map<string, Node> }
 interface Fragment { x: number; y: number; depth: number; vx: number; vy: number; age: number; life: number; size: number; color: string }
 
 @ccclass("IsometricDemo")
 export class IsometricDemo extends Component {
   private lab = new LayeredLab();
   private words = new WordPassages(this.lab);
+  private skin = new LabUISkin();
   private wordUI!: WordPassageUI;
   private interactButton!: Label;
   private wordMarks!: Graphics;
@@ -45,7 +52,7 @@ export class IsometricDemo extends Component {
   private actors: Actor[] = [];
   private player!: Actor;
   private marker!: Graphics;
-  private stick!: Graphics;
+  private paintStick!: (x: number, y: number, active: boolean) => void;
   private readout!: Label;
   private gridButton!: Label;
   private cameraButton!: Label;
@@ -53,7 +60,7 @@ export class IsometricDemo extends Component {
   private joystick = { x: 0, y: 0, id: -1 };
   private cameraX = MAP.size / 2;
   private cameraY = MAP.size / 2;
-  private follow = false;
+  private follow = true;
   private grid = true;
   private ready = false;
   private safeAreaObserver: ResizeObserver | null = null;
@@ -64,7 +71,7 @@ export class IsometricDemo extends Component {
   private notice!: Label;
   private impactButton!: Label;
   private fragments: Fragment[] = [];
-  private sinks: { x: number; y: number; depth: number; age: number; color: string }[] = [];
+  private sinks: { x: number; y: number; depth: number; age: number; color: string; height:number }[] = [];
   private shake = 0;
   private elapsed = 0;
   private lastMessage = "";
@@ -77,6 +84,7 @@ export class IsometricDemo extends Component {
   private camera!: Camera;
   private buttonResets: (() => void)[] = [];
   private lastDepth = 0;
+  private cardViews=new Map<object,Label>();
 
   onLoad(): void {
     try { const raw = sys.localStorage.getItem(LAB_STORAGE_KEY); if (raw) this.words.restore(raw); }
@@ -115,11 +123,8 @@ export class IsometricDemo extends Component {
     label.color = this.color(C.ink); label.overflow = Label.Overflow.SHRINK; return label;
   }
   private button(title: string, x: number, y: number, action: () => void, hold?: (down: boolean) => void, height = 86): Label {
-    const node = this.make(title, this.node, x, y, 180, height), g = node.addComponent(Graphics);
-    const paint = (pressed: boolean) => {
-      g.clear(); g.fillColor = this.color(hold ? (pressed ? C.primaryPressed : C.primary) : (pressed ? C.pressed : C.panel)); g.strokeColor = this.color(C.border); g.lineWidth = 2;
-      g.rect(-90, -height / 2, 180, height); g.fill(); g.stroke();
-    };
+    const node = this.make(title, this.node, x, y, 180, height);
+    const paint = this.skin.hudButton(node, title, !!hold);
     paint(false);
     let pointer: number | null = null;
     node.on(Node.EventType.TOUCH_START, (e: EventTouch) => { e.propagationStopped = true; if (pointer === null) { pointer = e.getID(); hold?.(true); paint(true); } });
@@ -130,23 +135,24 @@ export class IsometricDemo extends Component {
     });
     const release = () => { pointer = null; hold?.(false); paint(false); };
     node.on(Node.EventType.TOUCH_CANCEL, release); this.buttonResets.push(release);
-    const label = this.text(node, "文字", title, 0, 0, 160, 26);
+    const label = this.text(node, "文字", title, hold ? 0 : 17, hold ? -25 : 0, hold ? 160 : 128, hold ? 26 : 23);
     if (hold) label.color = this.color(C.darkInk); return label;
   }
   private buildUI(): void {
-    const plate = this.make("标题底色", this.node, -405, 286, 370, 94).addComponent(Graphics);
-    plate.fillColor = this.color(C.background); plate.rect(-230, -47, 460, 94); plate.fill();
+    const plate = this.make("标题底色", this.node, -405, 286, 374, 94);
+    this.skin.frame(plate, 'ui-panel-hud', true);
     this.titleText = this.text(this.node, "标题", "破土向下 · 阳光森林", -405, 306, 350, 30);
     this.subtitleText = this.text(this.node, "说明", "最深 1 层 · 矿晶 0", -405, 271, 350, 21); this.subtitleText.color = this.color(C.muted);
     this.gridButton = this.button("网格 · 开", 295, 286, () => this.toggleGrid());
-    this.cameraButton = this.button("镜头 · 全景", 505, 286, () => this.toggleCamera());
+    this.cameraButton = this.button("镜头 · 跟随", 505, 286, () => this.toggleCamera());
     this.button("回到入口", 295, -281, () => { this.lab.returnToEntry(); this.resetInput(); });
     this.button("返回上层", 295, -177, () => { this.lab.ascend(); this.resetInput(); });
     this.impactButton = this.button("敲击地面", 505, -239, () => { if (!this.wordUI.active) this.lab.tapStrike(); }, down => {
       this.striking = down; if (down) this.playSound("hit");
     }, 170);
     const audio = this.button("声音 · 开", 85, 286, () => { this.sound = !this.sound; audio.string = "声音 · " + (this.sound ? "开" : "关"); });
-    this.stick = this.make("摇杆", this.node, -495, -235, 192, 192).addComponent(Graphics);
+    const stick = this.make("摇杆", this.node, -495, -235, 192, 192);
+    this.paintStick = this.skin.joystick(stick);
     const move = (e: EventTouch) => {
       e.propagationStopped = true;
       if (!this.ready || this.lab.travel || this.wordUI?.active || view.getFrameSize().height > view.getFrameSize().width) return;
@@ -154,26 +160,31 @@ export class IsometricDemo extends Component {
       const p = e.getUILocation(), x = p.x - 640 + 495, y = p.y - 360 + 235, d = Math.max(65, Math.hypot(x, y));
       this.joystick = { x: x / d, y: y / d, id: e.getID()! };
     };
-    this.stick.node.on(Node.EventType.TOUCH_START, move); this.stick.node.on(Node.EventType.TOUCH_MOVE, move);
+    stick.on(Node.EventType.TOUCH_START, move); stick.on(Node.EventType.TOUCH_MOVE, move);
     const end = (e: EventTouch) => { e.propagationStopped = true; if (this.joystick.id === e.getID()) this.joystick = { x: 0, y: 0, id: -1 }; };
-    this.stick.node.on(Node.EventType.TOUCH_END, end); this.stick.node.on(Node.EventType.TOUCH_CANCEL, end);
+    stick.on(Node.EventType.TOUCH_END, end); stick.on(Node.EventType.TOUCH_CANCEL, end);
     this.text(this.node, "移动说明", sys.isMobile ? "移动" : "WASD / 方向键", -495, -340, 250, 20);
     this.readout = this.text(this.node, "位置", "正在装入试验场…", 0, -315, 520, 23);
-    this.notice = this.text(this.node, "发现提示", "", 0, 192, 880, 27);
+    this.notice = this.text(this.node, "发现提示", "", 0, 100, 780, 27);
     this.notice.enableOutline = true; this.notice.outlineWidth = 3; this.notice.outlineColor = this.color(C.background);
     this.button("字母袋", -125, 286, () => this.openWords("bag"));
+    this.button('资源背包',-495,180,()=>this.openWords('inventory'),undefined,60);
+    this.button('词义图鉴',-285,180,()=>this.openWords('dex'),undefined,60);
     this.interactButton = this.button("探索互动", 505, -105, () => this.interact(), undefined, 64);
-    this.wordUI = new WordPassageUI(this.node, this.words, () => { this.lab.layer().revision++; this.saveLab(); }, (letters, finish) => {
+    this.wordUI = new WordPassageUI(this.node, this.words, () => { this.saveLab(); }, (letters, finish) => {
       if (letters.startsWith("+")) { this.showLetterLoot(letters.slice(1)); return; }
       this.weapon.string = letters; this.swingAge = 0; this.finishSwing = finish ?? null; this.playSound("hit");
       const p = this.words.services[0]; this.lab.target = { x: p.x, y: p.y };
-    }, () => { const p = this.words.services[0]; if (!this.words.room.opened) this.lab.tile(p.x,p.y)!.damage = 0; this.resetInput(); });
+    }, () => { const p = this.words.services[0]; if (!this.words.room.opened) this.lab.tile(p.x,p.y)!.damage = 0; this.resetInput(); }, this.skin);
   }
   private openWords(mode: string, index = 0): void {
     if (!this.ready || this.lab.travel) return;
     this.resetInput(); this.wordUI.open(mode, index);
   }
   private interact(): void {
+    if(this.wordUI.active||this.lab.travel)return;
+    const target=this.lab.selected();
+    if(this.words.adventure.open(target.x,target.y)){this.openWords('worldchest');return;}
     const p = this.words.nearby(); if (!p || this.wordUI.active) return;
     if (p.id === "seal") this.openWords("seal");
     else if (p.id.startsWith("chest")) this.openWords("chest", Number(p.id.slice(-1)));
@@ -194,18 +205,23 @@ export class IsometricDemo extends Component {
 
   private async load(): Promise<void> {
     try {
-      const texture = await new Promise<Texture2D>((resolve, reject) => resources.load("xpaa/validation-board/texture", Texture2D, (error, asset) => error ? reject(error) : resolve(asset)));
+      const [atlases, uiFrames] = await Promise.all([
+        new Promise<SpriteAtlas[]>((resolve, reject) =>
+          resources.loadDir("art-v101", SpriteAtlas, (error, assets) => error ? reject(error) : resolve(assets))),
+        new Promise<SpriteFrame[]>((resolve, reject) =>
+          resources.loadDir("art-v101/ui", SpriteFrame, (error, assets) => error ? reject(error) : resolve(assets))),
+      ]);
       if (!this.isValid) return;
-      texture.setFilters(Texture2D.Filter.NEAREST, Texture2D.Filter.NEAREST);
-      for (const [name, [x, y, w, h]] of Object.entries(XPAA_REGIONS)) {
-        const frame = new SpriteFrame(); frame.name = name; frame.texture = texture; frame.rect = new Rect(x, y, w, h);
-        frame.originalSize = new Size(w, h); frame.packable = false;
-        if (name.startsWith("walk_")) { frame.originalSize = new Size(...WALK_CANVAS); frame.offset = new Vec2(0, (h - WALK_CANVAS[1]) / 2); }
+      for (const atlas of atlases) for (const [name, frame] of Object.entries(atlas.spriteFrames)) {
+        if (!frame) throw new Error(atlas.name + " 缺少图帧 " + name);
+        frame.texture.setFilters(Texture2D.Filter.NEAREST, Texture2D.Filter.NEAREST);
         this.frames.set(name, frame);
       }
-      const original = await new Promise<SpriteFrame[]>((resolve, reject) => resources.loadDir("art", SpriteFrame, (error, assets) => error ? reject(error) : resolve(assets)));
-      if (!this.isValid) return;
-      for (const frame of original) { frame.texture.setFilters(Texture2D.Filter.NEAREST, Texture2D.Filter.NEAREST); this.frames.set(frame.name, frame); }
+      for (const frame of uiFrames) {
+        frame.texture.setFilters(Texture2D.Filter.NEAREST, Texture2D.Filter.NEAREST);
+        this.frames.set(frame.name, frame);
+      }
+      this.skin.bind(this.frames);
       this.ensureView(this.lab.depth); this.player = this.actor(this.layerViews.get(this.lab.depth)!.actorsNode, "walk_down_0", this.walk.x, this.walk.y, 48);
       this.marker = this.make("裂纹与碎屑", this.world).addComponent(Graphics);
       this.pickup = this.text(this.world, "拾取提示", "矿晶 +1", 0, 0, 220, 25); this.pickup.color = this.color(C.accent);
@@ -242,7 +258,9 @@ export class IsometricDemo extends Component {
   }
   private sprite(parent: Node, art: string, width: number): { node: Node; sprite: Sprite } {
     const node = this.make(art, parent, 0, 0, width, width), sprite = node.addComponent(Sprite);
-    const frame = this.frames.get(art)!; sprite.spriteFrame = frame; sprite.sizeMode = Sprite.SizeMode.CUSTOM; sprite.trim = false;
+    const frame = this.frames.get(art);
+    if (!frame) throw new Error("缺少图帧 " + art);
+    sprite.spriteFrame = frame; sprite.sizeMode = Sprite.SizeMode.CUSTOM; sprite.trim = false;
     node.getComponent(UITransform)!.setContentSize(width, width * frame.originalSize.height / frame.originalSize.width);
     return { node, sprite };
   }
@@ -250,9 +268,6 @@ export class IsometricDemo extends Component {
     const item = this.sprite(parent, art, width); item.node.getComponent(UITransform)!.setAnchorPoint(0.5, 0);
     const p = isoProject(x, y); item.node.setPosition(p.x, p.y);
     return { ...item, x, y, width, opacity: item.node.addComponent(UIOpacity) };
-  }
-  private shade(hex: string, factor: number): string {
-    return hex.match(/../g)!.map(v => Math.round(Math.min(255, parseInt(v, 16) * factor)).toString(16).padStart(2, "0")).join("");
   }
   private ensureView(depth: number): LayerView {
     const layer = this.lab.layer(depth), existing = this.layerViews.get(depth);
@@ -262,43 +277,46 @@ export class IsometricDemo extends Component {
       existing.node.destroy(); this.layerViews.delete(depth);
     }
     const node = this.make("地层 " + (depth + 1), this.world); node.setPosition(0, -depth * LAB_LAYER_GAP);
-    const theme = LAB_THEMES[layer.theme], edge = this.make("地层剖面", node).addComponent(Graphics), n = MAP.size;
-    const left = isoProject(0, n), bottom = isoProject(n, n), right = isoProject(n, 0);
-    for (let band = 0; band < 3; band++) {
-      const offset = band * 18, lower = offset + 18;
-      this.polygon(edge, [{ x: left.x, y: left.y - offset }, { x: bottom.x, y: bottom.y - offset }, { x: bottom.x, y: bottom.y - lower }, { x: left.x, y: left.y - lower }], this.shade(theme.side, (depth>0?.14:1)*(1 - band * 0.14)));
-      this.polygon(edge, [{ x: bottom.x, y: bottom.y - offset }, { x: right.x, y: right.y - offset }, { x: right.x, y: right.y - lower }, { x: bottom.x, y: bottom.y - lower }], this.shade(theme.edge, (depth>0?.14:1)*(1 - band * 0.12)));
+    const theme = LAB_THEMES[layer.theme], n = layer.tiles.length;
+    const edges = this.make("地层剖面", node);
+    for (let i = 0; i < n; i++) {
+      // Each edge frame covers half a tile in X and one full layer face in height.
+      const left = isoProject(i + .5, n), right = isoProject(n, i + .5);
+      const west = this.sprite(edges, theme.id + "_edge_west", W / 2);
+      const east = this.sprite(edges, theme.id + "_edge_east", W / 2);
+      west.node.setPosition(left.x, left.y - LAB_BLOCK_HEIGHT / 2);
+      east.node.setPosition(right.x, right.y - LAB_BLOCK_HEIGHT / 2);
+      if (depth > 0) west.sprite.color = east.sprite.color = this.color("242424");
     }
     const ground = this.make("地面网格", node), floors = new Map<string, Node>();
+    const features = this.make("矿脉与通道", node);
+    const farm = LAB_VILLAGE.farm;
     for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-      if (layer.tiles[y][x].hole) continue;
-      const p = isoProject(x + 0.5, y + 0.5), tile = this.make("地块", ground, p.x, p.y);
-      floors.set(x + "," + y, tile); tile.setScale(1, H / W, 1);
-      const image = this.sprite(tile, theme.texture, (W + 0.5) / Math.SQRT2);
-      image.node.setRotationFromEuler(0, 0, 45);
-      if (layer.theme > 0) image.sprite.color = this.color(layer.theme === 1 ? "b5ac94" : "a3b6cd");
-    }
-    const paths = this.make("路径水面与入口", node).addComponent(Graphics);
-    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-      const tile = layer.tiles[y][x];
-      if (tile.hole) { this.drawPortal(paths, layer, x, y); continue; }
-      if (tile.kind === "path") this.diamond(paths, x, y, theme.path);
-      if (tile.kind === "water") {
-        this.diamond(paths, x, y, layer.theme === 0 ? "527e78" : "3c625c");
-        const p = isoProject(x + 0.5, y + 0.5); paths.strokeColor = this.color("91b6a4"); paths.lineWidth = 1;
-        paths.ellipse(p.x, p.y, 14, 5); paths.stroke();
+      const tile = layer.tiles[y][x], center = isoProject(x + .5, y + .5);
+      if (tile.hole) {
+        const lower = this.lab.layer(depth + 1);
+        const opening = this.sprite(features, LAB_THEMES[lower.theme].id + "_shaft", W);
+        opening.node.setPosition(center.x, center.y - LAB_BLOCK_HEIGHT / 2);
+        const contents = lower.tiles[y]?.[x]?.kind;
+        if (contents === "root" || contents === "ore") {
+          const glimpse = this.sprite(features, contents === "root" ? "giant_root" : "glow_vein", 23);
+          glimpse.node.setPosition(center.x + 9, center.y - LAB_BLOCK_HEIGHT + 4);
+          glimpse.sprite.color = this.color("969487");
+        }
+        continue;
       }
-      if (tile.kind === "ore") {
-        const p = isoProject(x + 0.5, y + 0.5); paths.fillColor = this.color(theme.light + "35");
-        paths.ellipse(p.x, p.y, 45, 18); paths.fill();
-        paths.strokeColor = this.color(theme.light + "95"); paths.lineWidth = 2;
-        paths.moveTo(p.x - 32, p.y - 6); paths.lineTo(p.x - 10, p.y + 1); paths.lineTo(p.x + 30, p.y - 8); paths.stroke();
-      }
+      const inField = depth === 0 && n > 13 && x >= farm.minX && x <= farm.maxX && y >= farm.minY && y <= farm.maxY;
+      const material = tile.kind === "path" ? "trail" : tile.kind === "water" ? "water" : "floor";
+      const variant = hashCoords(LAB_WORLD_SEED, x, y, depth, 918) % 3;
+      const name = inField && material === "floor" ? "field" : theme.id + "_" + material + "_" + variant;
+      const image = this.sprite(ground, name, W);
+      image.node.setPosition(center.x, center.y); floors.set(x + "," + y, image.node);
+      if (layer.theme === 2) image.sprite.color = this.color(STRATUM_TINT[stratumAt(depth).id]);
     }
     for (const p of layer.entrances) {
-      const at = isoProject(p.x + 0.5, p.y + 0.5); paths.strokeColor = this.color(C.accent); paths.lineWidth = 3;
-      paths.moveTo(at.x - 8, at.y); paths.lineTo(at.x - 8, at.y + 32); paths.moveTo(at.x + 8, at.y); paths.lineTo(at.x + 8, at.y + 32);
-      for (let i = 0; i < 4; i++) { paths.moveTo(at.x - 8, at.y + i * 9); paths.lineTo(at.x + 8, at.y + i * 9); } paths.stroke();
+      const at = isoProject(p.x + .5, p.y + .5), ladder = this.sprite(features, "ladder_up", 32);
+      ladder.node.getComponent(UITransform)!.setAnchorPoint(.5, 0);
+      ladder.node.setPosition(at.x, at.y);
     }
     const grid = this.make("地块网格", node).addComponent(Graphics);
     grid.strokeColor = new Color(229, 231, 197, 90); grid.lineWidth = 1;
@@ -312,85 +330,71 @@ export class IsometricDemo extends Component {
     const actorsNode = this.make("脚底排序", node), actors: Actor[] = [];
     for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
       const kind = layer.tiles[y][x].kind;
-      if (kind === "tree" || kind === "rock" || kind === "ore") {
-        const original = MAP.props.find(p => p.x === x && p.y === y);
-        const art = kind === "ore" ? (layer.theme === 1 ? "node_emerald" : "node_crystal") : original?.art ?? "xpaa_stone";
-        const actor = this.actor(actorsNode, art, x + 0.5, y + 0.5, kind === "ore" ? 72 : original?.width ?? 64);
-        if (kind === "ore" && layer.theme === 2) actor.sprite!.color = this.color("81c7e0");
-        actors.push(actor);
-      } else if (kind === "root" || kind === "wall") {
-        const p = isoProject(x + 0.5, y + 0.5), obstacle = this.make(kind, actorsNode, p.x, p.y, W, 90), g = obstacle.addComponent(Graphics);
-        obstacle.getComponent(UITransform)!.setAnchorPoint(0.5, 0);
-        const paint=(light:number)=>{g.clear();
-        if (kind === "root") {
-          g.strokeColor = this.color(this.shade("3c2e23",light)); g.lineWidth = 18;
-          g.moveTo(-35, -2); g.bezierCurveTo(-14, 29, 5, 9, 32, 32); g.stroke();
-          g.strokeColor = this.color(this.shade("967450",light)); g.lineWidth = 9;
-          g.moveTo(-35, 2); g.bezierCurveTo(-14, 33, 5, 13, 32, 36); g.stroke();
-          g.lineWidth = 4; g.moveTo(-6, 19); g.bezierCurveTo(8, 48, 25, 34, 35, 46); g.stroke();
-        } else {
-          this.polygon(g, [{ x: -48, y: 0 }, { x: 0, y: -24 }, { x: 0, y: 22 }, { x: -48, y: 46 }], this.shade("394453",light));
-          this.polygon(g, [{ x: 0, y: -24 }, { x: 48, y: 0 }, { x: 48, y: 46 }, { x: 0, y: 22 }], this.shade("263240",light));
-          this.polygon(g, [{ x: 0, y: 70 }, { x: 48, y: 46 }, { x: 0, y: 22 }, { x: -48, y: 46 }], this.shade("647180",light));
-        }
-        };paint(1);
-        actors.push({ node: obstacle, x: x + 0.5, y: y + 0.5, width: W, opacity: obstacle.addComponent(UIOpacity),paint });
+      let art: string;
+      let width = 64;
+      if (kind === "tree") {
+        const fixed = depth === 0 ? MAP.props.find(p => p.x === x && p.y === y) : undefined;
+        const pine = fixed ? fixed.art === "xpaa_pine" : hashCoords(LAB_WORLD_SEED, x, y, depth, 919) % 3 === 0;
+        art = pine ? "pine" : "oak"; width = pine ? 104 : 134;
+      } else if (kind === "rock") art = "boulder";
+      else if (kind === "ore") {
+        const inner = x < MAP.size && y < MAP.size;
+        art = inner && layer.theme === 1 ? "root_heart" : inner && layer.theme === 2 ? "glow_vein" : stratumAt(Math.max(1, depth)).oreTile;
+        width = 72;
+      } else if (kind === "stubborn") { art = "stubborn_stone"; width = 72; }
+      else if (kind === "root") { art = "giant_root"; width = W; }
+      else if (kind === "soil" || kind === "wall") { art = theme.id + "_" + kind; width = W; }
+      else if (kind === "chest") art = "treasure_chest";
+      else if (kind === "relic" || kind === "pack_part") {
+        art = kind === "relic" ? "unexamined_relic" : "damaged_pack_part"; width = 48;
+      } else continue;
+      const actor = this.actor(actorsNode, art, x + .5, y + .5, width);
+      if (kind === "wall" || kind === "soil") {
+        const transform = actor.node.getComponent(UITransform)!;
+        transform.setAnchorPoint(.5, H / (2 * transform.height));
       }
+      actors.push(actor);
     }
+    if (depth === 0 && n > 13) for (const house of LAB_VILLAGE.houses)
+      actors.push(this.actor(actorsNode, house.sprite, house.x + house.width / 2, house.y + house.depth, 180));
     if (depth === this.lab.depth) for (const p of this.words.services) {
-      if (!this.words.serviceAt(p.x,p.y)) continue;
-      if (p.id === "npc") {
-        const a = this.actor(actorsNode,"tom_front",p.x+.5,p.y+.5,40); actors.push(a); continue;
-      }
-      const at = isoProject(p.x+.5,p.y+.5), block=this.make(p.title,actorsNode,at.x,at.y,W,70), g=block.addComponent(Graphics);
-      block.getComponent(UITransform)!.setAnchorPoint(.5,0);
-      const hue=p.id==='seal'?'b69865':p.id==='clue'?'7eabb5':'ba945d';
-      const paint=(light:number)=>{g.clear();
-      this.polygon(g,[{x:-26,y:0},{x:0,y:-13},{x:0,y:18},{x:-26,y:31}],this.shade(hue,.65*light));
-      this.polygon(g,[{x:0,y:-13},{x:26,y:0},{x:26,y:31},{x:0,y:18}],this.shade(hue,.8*light));
-      this.polygon(g,[{x:-26,y:31},{x:0,y:44},{x:26,y:31},{x:0,y:18}],this.shade(hue,light));
-      };paint(1);
-      this.text(block,"标识",p.id==='seal'?'◇':p.id==='clue'?'碑':'箱',0,32,50,23);
-      actors.push({node:block,x:p.x+.5,y:p.y+.5,width:W,opacity:block.addComponent(UIOpacity),paint});
+      if (!this.words.serviceAt(p.x, p.y)) continue;
+      const art = p.id === "npc" ? "npc_trader" : p.id === "may" ? "npc_may" :
+        p.id === "seal" ? "seal_arch" : p.id === "clue" ? "inscription" : "letter_chest";
+      const width = p.id === "npc" || p.id === "may" ? 48 : 64;
+      actors.push(this.actor(actorsNode, art, p.x + .5, p.y + .5, width));
     }
-    const view = { node, actorsNode, actors, grid, fog, brightness, revision: layer.revision, floors }; this.layerViews.set(depth, view); return view;
+    const view = { node, actorsNode, actors, grid, fog, brightness, fogAlpha: new Uint16Array(n*n).fill(256), revision: layer.revision, floors }; this.layerViews.set(depth, view); return view;
   }
 
   private lightLayers(dt: number): void {
     for (const [depth,v] of this.layerViews) {
-      const g=v.fog; g.clear();
       if(depth===0)continue;
-      for(let y=0;y<MAP.size;y++)for(let x=0;x<MAP.size;x++){
-        const i=y*MAP.size+x,target=labBrightness(depth,Math.hypot(x+.5-this.walk.x,y+.5-this.walk.y));
+      const n=this.lab.layer(depth).tiles.length;
+      let fogChanged=false;
+      for(let y=0;y<n;y++)for(let x=0;x<n;x++){
+        const i=y*n+x,target=labBrightness(depth,Math.hypot(x+.5-this.walk.x,y+.5-this.walk.y));
         v.brightness[i]=smoothBrightness(v.brightness[i],target,dt);
-        this.diamond(g,x,y,LAB_LAMP.darkness+Math.round(255*(1-v.brightness[i])).toString(16).padStart(2,"0"));
+        const alpha=Math.round(255*(1-v.brightness[i]));
+        if(v.fogAlpha[i]!==alpha){v.fogAlpha[i]=alpha;fogChanged=true;}
+      }
+      // Keep interpolation at frame rate; rebuild geometry only when its 8-bit colour changes.
+      if(fogChanged){
+        const g=v.fog;g.clear();
+        for(let y=0;y<n;y++)for(let x=0;x<n;x++)
+          this.diamond(g,x,y,LAB_LAMP.darkness+v.fogAlpha[y*n+x].toString(16).padStart(2,"0"));
       }
       // Upright props must disappear with their ground; a floor-only mask leaves distant chests exposed.
       for(const actor of v.actors){
         const target=labBrightness(depth,Math.hypot(actor.x-this.walk.x,actor.y-this.walk.y));
         actor.brightness=smoothBrightness(actor.brightness??-1,target,dt);
         const at=isoProject(actor.x,actor.y),p=isoProject(this.walk.x,this.walk.y),h=actor.node.getComponent(UITransform)!.height;
-        actor.opacity.opacity=Math.round(255*Math.pow(actor.brightness,1.35)*occlusionAlpha(at.x-p.x,p.y-at.y,actor.width,h,48,69));
-        // Graphics bakes vertex colours and does not honor UIOpacity like Sprite/Label.
-        actor.paint?.(Math.pow(actor.brightness,1.35));
+        const fade=occlusionAlpha(at.x-p.x,p.y-at.y,actor.width,h,48,69);
+        actor.opacity.opacity=Math.round(255*Math.pow(actor.brightness,1.35)*fade);
+        const tint = Math.round(255 * Math.pow(actor.brightness, 1.35));
+        if (actor.sprite.color.r !== tint) actor.sprite.color = new Color(tint, tint, tint);
       }
     }
-  }
-
-  private drawPortal(g: Graphics, layer: LabLayer, x: number, y: number): void {
-    const below = this.lab.layer(layer.depth + 1), theme = LAB_THEMES[below.theme], points = [isoProject(x, y), isoProject(x + 1, y), isoProject(x + 1, y + 1), isoProject(x, y + 1)];
-    this.polygon(g, points, "101713");
-    for (let band = 0; band < 3; band++) {
-      const top = band * 18, bottom = top + 18;
-      for (const [a, b] of [[0, 1], [3, 0]]) this.polygon(g, [{ x: points[a].x, y: points[a].y - top }, { x: points[b].x, y: points[b].y - top }, { x: points[b].x, y: points[b].y - bottom }, { x: points[a].x, y: points[a].y - bottom }], this.shade(theme.side, 1 - band * 0.15));
-    }
-    this.polygon(g, points.map(p => ({ x: p.x, y: p.y - 54 })), theme.floor);
-    const center = isoProject(x + 0.5, y + 0.5), kind = below.tiles[y][x].kind;
-    g.fillColor = this.color(kind === "ore" ? theme.light : this.shade(theme.floor, 1.25));
-    g.ellipse(center.x, center.y - 54, kind === "root" ? 20 : 10, 5); g.fill();
-    g.strokeColor = this.color(C.accent); g.lineWidth = 2;
-    g.moveTo(center.x - 7, center.y); g.lineTo(center.x - 7, center.y - 54); g.moveTo(center.x + 7, center.y); g.lineTo(center.x + 7, center.y - 54);
-    for (let i = 0; i < 5; i++) { g.moveTo(center.x - 7, center.y - i * 12); g.lineTo(center.x + 7, center.y - i * 12); } g.stroke();
   }
 
   private toggleGrid(): void { this.grid = !this.grid; this.gridButton.string = "网格 · " + (this.grid ? "开" : "关"); }
@@ -413,6 +417,7 @@ export class IsometricDemo extends Component {
     if (e.keyCode === KeyCode.KEY_R) { this.lab.returnToEntry(); this.resetInput(); }
     if (e.keyCode === KeyCode.KEY_E) this.interact();
     if (e.keyCode === KeyCode.KEY_B) this.openWords("bag");
+    if (e.keyCode === KeyCode.KEY_I) this.openWords('dex');
   }
   private keyUp(e: EventKeyboard): void { this.keys.delete(e.keyCode); if (e.keyCode === KeyCode.SPACE) this.striking = false; }
   private resetInput(): void {
@@ -435,14 +440,14 @@ export class IsometricDemo extends Component {
   }
 
   private effect(event: LabEffect): void {
-    this.playSound(event.kind);
+    this.playSound(event.kind==='chest'?'resource':event.kind);
     if (event.kind === "arrive") return;
     const theme = LAB_THEMES[this.lab.layer(event.depth).theme], p = isoProject(event.x + 0.5, event.y + 0.5);
-    const count = event.kind === "collapse" ? 14 : 4;
-    for (let i = 0; i < count; i++) this.fragments.push({ x: p.x, y: p.y + 10, depth: event.depth, vx: (Math.random() - 0.5) * 105, vy: 20 + Math.random() * 65, age: 0, life: 0.4 + Math.random() * 0.35, size: 3 + Math.random() * 5, color: i % 3 === 0 ? theme.light : theme.side });
+    const count = event.kind === "chest" ? 18 : event.kind === "collapse" ? 14 : 4;
+    for (let i = 0; i < count; i++) this.fragments.push({ x: p.x, y: p.y + (event.height??0)+10, depth: event.depth, vx: (Math.random() - 0.5) * 105, vy: 20 + Math.random() * 65, age: 0, life: 0.4 + Math.random() * 0.35, size: 3 + Math.random() * 5, color: event.kind==='chest'?'e4c66c':i % 3 === 0 ? theme.light : theme.side });
     if (this.fragments.length > LAB_PARTICLE_CAP) this.fragments.splice(0, this.fragments.length - LAB_PARTICLE_CAP);
     this.shake = event.kind === "collapse" ? 0.13 : 0.055;
-    if (event.kind === "collapse") this.sinks.push({ x: event.x, y: event.y, depth: event.depth, age: 0, color: theme.floor });
+    if (event.kind === "collapse") this.sinks.push({ x: event.x, y: event.y, depth: event.depth, age: 0, color: theme.floor,height:event.height??0 });
     if (this.sinks.length > 6) this.sinks.shift();
     if (event.kind === "resource") { this.pickupPoint = { x: p.x, y: p.y, depth: event.depth }; this.pickupAge = 0; }
   }
@@ -452,11 +457,11 @@ export class IsometricDemo extends Component {
     const target = this.lab.selected(), tile = this.lab.tile(target.x, target.y)!;
     this.wordDamage += (tile.damage-this.wordDamage)*(1-Math.exp(-14*dt));
     const damage = this.wordUI.active ? this.wordDamage : tile.damage;
-    const at = isoProject(target.x + 0.5, target.y + 0.5), offset = 0;
+    const at = isoProject(target.x + 0.5, target.y + 0.5), offset = tile.kind==='wall'?LAB_WALL_HEIGHT:tile.kind==='soil'?LAB_SOIL_HEIGHT:0;
     if (this.lab.depth > 0) {
       const foot = isoProject(this.walk.x, this.walk.y), theme = LAB_THEMES[this.lab.layer().theme];
       for (let ring = 3; ring > 0; ring--) {
-        g.fillColor = this.color(theme.light + "08"); g.ellipse(foot.x, foot.y + offset, W * ring * 0.65, H * ring * 0.65); g.fill();
+        g.fillColor = this.color(theme.light + "08"); g.ellipse(foot.x, foot.y, W * ring * 0.65, H * ring * 0.65); g.fill();
       }
     }
     g.strokeColor = this.color(C.accent); g.lineWidth = 2;
@@ -472,7 +477,7 @@ export class IsometricDemo extends Component {
       // 镐柄与镐头围绕角色手部挥动；角色贴图本身不变形。
       if (!this.wordUI.active) {
       const player = isoProject(this.walk.x, this.walk.y), swing = Math.sin(this.elapsed * 18), dx = at.x - player.x;
-      const hx = player.x + (dx >= 0 ? 18 : -18), hy = player.y + offset + 22;
+      const hx = player.x + (dx >= 0 ? 18 : -18), hy = player.y + 22;
       g.strokeColor = this.color("be9b65"); g.lineWidth = 4; g.moveTo(hx, hy); g.lineTo(hx + swing * 21, hy + 18 - swing * 8); g.stroke();
       g.strokeColor = this.color("d4dbda"); g.moveTo(hx + swing * 21 - 10, hy + 16 - swing * 8); g.lineTo(hx + swing * 21 + 9, hy + 24 - swing * 8); g.stroke();
       }
@@ -481,7 +486,7 @@ export class IsometricDemo extends Component {
     for (const s of this.sinks) {
       s.age += dt; const alpha = Math.max(0, 1 - s.age / 0.4), drop = s.age * 95 + (s.depth - this.lab.depth) * LAB_LAYER_GAP;
       const points = [isoProject(s.x, s.y), isoProject(s.x + 1, s.y), isoProject(s.x + 1, s.y + 1), isoProject(s.x, s.y + 1)];
-      this.polygon(g, points.map(p => ({ x: p.x, y: p.y - drop })), s.color + Math.round(alpha * 200).toString(16).padStart(2, "0"));
+      this.polygon(g, points.map(p => ({ x: p.x, y: p.y +s.height- drop })), s.color + Math.round(alpha * 200).toString(16).padStart(2, "0"));
     }
     this.fragments = this.fragments.filter(p => p.age < p.life);
     for (const p of this.fragments) {
@@ -502,6 +507,12 @@ export class IsometricDemo extends Component {
     const editing = this.wordUI.active;
     this.lab.tick(dt, editing ? 0 : this.joystick.x + pressed(KeyCode.KEY_D, KeyCode.ARROW_RIGHT) - pressed(KeyCode.KEY_A, KeyCode.ARROW_LEFT), editing ? 0 : this.joystick.y + pressed(KeyCode.KEY_W, KeyCode.ARROW_UP) - pressed(KeyCode.KEY_S, KeyCode.ARROW_DOWN), !editing && this.striking);
     this.words.prepare();
+    if(this.words.adventure.pendingLoot&&!this.wordUI.active)this.openWords('overflow');
+    else if(this.words.adventure.quiz&&!this.wordUI.active)this.openWords('worldchest');
+    for(const notice of this.words.adventure.notices.splice(0)){
+      this.lab.message=notice;this.pickup.string=notice;this.pickupAge=0;
+      const at=isoProject(this.walk.x,this.walk.y);this.pickupPoint={...at,depth:this.lab.depth};
+    }
     this.saveClock += dt; if (this.saveClock >= 1) { this.saveClock = 0; this.saveLab(); }
     this.swingAge += dt;
     if (this.finishSwing && this.swingAge >= LAB_WORD_RULES.finishSeconds) { const finish = this.finishSwing; this.finishSwing = null; finish(); }
@@ -525,22 +536,27 @@ export class IsometricDemo extends Component {
     const viewDepth = travel ? travel.from + (travel.to - travel.from) * smooth : this.lab.depth;
     const playerDepth = travel ? travel.from + (travel.to - travel.from) * Math.min(1, Math.pow(q, 1.4) * 1.2) : this.lab.depth;
     const blend = 1 - Math.exp(-8 * dt);
-    this.cameraX += ((this.follow ? this.walk.x : MAP.size / 2) - this.cameraX) * blend;
-    this.cameraY += ((this.follow ? this.walk.y : MAP.size / 2) - this.cameraY) * blend;
-    const camera = isoProject(this.cameraX, this.cameraY), zoom = travel ? 0.72 : this.follow ? ISO_FOLLOW_ZOOM : ISO_OVERVIEW_ZOOM;
+    const size=this.lab.layer().tiles.length;
+    this.cameraX += ((this.follow ? this.walk.x : size / 2) - this.cameraX) * blend;
+    this.cameraY += ((this.follow ? this.walk.y : size / 2) - this.cameraY) * blend;
+    const camera = isoProject(this.cameraX, this.cameraY), overview=Math.min(ISO_OVERVIEW_ZOOM,1100/(size*W),460/(size*H)), zoom = travel ? Math.min(.72,this.follow? .72:overview) : this.follow ? ISO_FOLLOW_ZOOM : overview;
     const shake = this.shake > 0 ? Math.sin(this.elapsed * 92) * 2.2 * this.shake / 0.13 : 0;
     const focus = editing ? isoProject(this.walk.x,this.walk.y) : camera;
     this.world.setScale(zoom, zoom, 1); this.world.setPosition(-focus.x * zoom + shake, (-focus.y + viewDepth * LAB_LAYER_GAP) * zoom + (editing ? 145 : -15));
     const p = isoProject(this.walk.x, this.walk.y), art = walkFrame(this.walk.facing.x, this.walk.facing.y, this.walk.distance, this.walk.distance > before + 0.0001);
+    if(Math.floor(this.walk.distance/.14)!==Math.floor(before/.14)&&this.fragments.length<LAB_PARTICLE_CAP)
+      this.fragments.push({x:p.x,y:p.y,depth:this.lab.depth,vx:(Math.random()-.5)*15,vy:8,age:0,life:.3,size:3,color:theme.path});
     const active = this.layerViews.get(this.lab.depth)!;
     this.player.node.parent = travel ? this.world : active.actorsNode;
     this.player.x = this.walk.x; this.player.y = this.walk.y; this.player.node.setPosition(p.x, p.y - (travel ? playerDepth * LAB_LAYER_GAP : 0)); this.player.sprite!.spriteFrame = this.frames.get(art)!;
     this.actors = [...active.actors, this.player];
     this.actors.sort((a, b) => (a.x + a.y) - (b.x + b.y));
+    const digTarget=this.lab.selected(),digDamage=this.lab.tile(digTarget.x,digTarget.y)?.damage??0;
     this.actors.forEach((actor, i) => {
       if (!travel || actor !== this.player) actor.node.setSiblingIndex(i);
       const foot = isoProject(actor.x, actor.y), h = actor.node.getComponent(UITransform)!.height;
-      actor.opacity.opacity = actor === this.player ? 255 : Math.round(255 * occlusionAlpha(foot.x - p.x, p.y - foot.y, actor.width, h, 48, 69));
+      if (actor === this.player || this.lab.depth === 0) actor.opacity.opacity = actor === this.player ? 255 : Math.round(255 * occlusionAlpha(foot.x - p.x, p.y - foot.y, actor.width, h, 48, 69));
+      if(actor!==this.player)actor.node.setPosition(foot.x+(actor.x===digTarget.x+.5&&actor.y===digTarget.y+.5&&digDamage>0&&(this.striking||this.shake>0)?Math.sin(this.elapsed*100)*1.5:0),foot.y);
       if (actor !== this.player && this.wordUI.mode === "seal" && actor.x === this.words.services[0].x+.5 && actor.y === this.words.services[0].y+.5)
         actor.node.setPosition(foot.x+(this.swingAge<.2?Math.sin(this.swingAge*100)*2:0),foot.y);
     });
@@ -550,6 +566,13 @@ export class IsometricDemo extends Component {
     if (travel) this.player.node.setSiblingIndex(this.world.children.length - 1);
     this.marker.node.setPosition(0, -this.lab.depth * LAB_LAYER_GAP);
     this.drawEffects(dt);
+    const drops=this.words.adventure.drops;
+    for(const [drop,label]of this.cardViews)if(!drops.includes(drop as typeof drops[number])){label.node.destroy();this.cardViews.delete(drop);}
+    for(const drop of drops){
+      let label=this.cardViews.get(drop);if(!label){label=this.text(this.world,'掉落词卡',drop.word,0,0,150,23);this.cardViews.set(drop,label);}
+      const at=isoProject(drop.x+.5,drop.y+.5);label.node.setPosition(at.x,at.y-drop.depth*LAB_LAYER_GAP+24+Math.sin(this.elapsed*3)*3);
+      label.node.active=drop.depth===this.lab.depth;label.color=this.color('f1dfa3'+Math.round(255*labBrightness(drop.depth,Math.hypot(drop.x+.5-this.walk.x,drop.y+.5-this.walk.y))).toString(16).padStart(2,'0'));
+    }
     this.weapon.node.active = this.swingAge < (this.finishSwing ? LAB_WORD_RULES.finishSeconds : .26);
     if (this.weapon.node.active) {
       const phase = Math.min(1,this.swingAge/(this.finishSwing ? LAB_WORD_RULES.finishSeconds : .26));
@@ -564,25 +587,23 @@ export class IsometricDemo extends Component {
     this.interactButton.string=nearby?nearby.title+" · 互动":"探索互动 · E";
     this.interactButton.color=this.color(nearby?C.ink:C.muted);
     this.titleText.string = "第 " + (this.lab.depth + 1) + " 层 · " + theme.name;
-    this.subtitleText.string = "最深 " + (this.lab.maxDepth + 1) + " 层 · 材料 " + this.lab.resources;
+    this.subtitleText.string = this.lab.depth+'m · 背包 '+this.words.adventure.usedSlots()+'/'+this.words.adventure.capacity+' · 金币 '+this.words.coins+' · 材料 '+this.lab.resources;
     const selected = this.lab.selected(), targetTile = this.lab.tile(selected.x, selected.y)!, damage = targetTile.damage;
-    const action = targetTile.kind === "ore" ? "敲开矿晶" : ["root", "tree", "wall", "rock"].includes(targetTile.kind) ? "敲开障碍" : "砸穿地面";
+    const action = targetTile.kind === "ore" ? "敲开矿晶" : targetTile.kind==='soil'?'挖开土层':targetTile.kind==='wall'?'凿开岩壁':["root", "tree", "rock"].includes(targetTile.kind) ? "敲开障碍" : "砸穿地面";
     this.impactButton.string = travel ? (travel.to > travel.from ? "下潜中…" : "返回中…") : action + "\n点按 / 空格";
-    this.readout.string = damage > 0 ? "地块裂开 " + Math.round(damage * 100) + "%" : nearby ? nearby.title+" · 点互动 / E；普通地面随时可下潜" : theme.objective;
+    const unlocked=this.lab.canDescend(this.lab.depth);
+    this.readout.string = damage > 0 ? "地块裂开 " + Math.round(damage * 100) + "%" : nearby ? nearby.title+" · 点互动 / E" : unlocked?'封印已解除 · 可继续探索或下潜':this.words.room.answer?'寻找本层封印 · 先寻宝、采集和收集字母':'暂无未见新词 · 返回已探索地层，等待词库扩充';
     if (this.lab.message !== this.lastMessage) { this.lastMessage = this.lab.message; this.notice.string = this.lab.message; this.noticeTime = 3.5; }
     this.noticeTime = Math.max(0, this.noticeTime - dt); this.notice.node.active = this.noticeTime > 0;
     if(this.saveError){this.notice.string=this.saveError;this.notice.node.active=true;}
     const sky=(depth:number)=>this.color(depth===0?LAB_THEMES[0].background:LAB_LAMP.darkness);
     this.camera.clearColor = travel ? Color.lerp(new Color(), sky(travel.from), sky(travel.to), smooth) : sky(this.lab.depth);
-    this.stick.clear(); this.stick.fillColor = this.color(C.background + "df"); this.stick.strokeColor = this.color(C.border); this.stick.lineWidth = 2;
-    this.stick.circle(0, 0, 86); this.stick.fill(); this.stick.stroke(); this.stick.circle(0, 0, 62); this.stick.stroke();
-    this.stick.fillColor = this.color(this.joystick.id === -1 ? C.muted : C.accent); this.stick.circle(this.joystick.x * 50, this.joystick.y * 50, 27); this.stick.fill();
+    this.paintStick(this.joystick.x, this.joystick.y, this.joystick.id !== -1);
   }
   onDestroy(): void {
     this.saveLab();
     if (this.audio) void this.audio.close();
     this.safeAreaObserver?.disconnect(); input.off(Input.EventType.KEY_DOWN, this.keyDown, this); input.off(Input.EventType.KEY_UP, this.keyUp, this);
     game.off(Game.EVENT_HIDE, this.resetInput, this); view.off("canvas-resize", this.resetInput, this);
-    for (const [name, frame] of this.frames) if (name.startsWith("walk_") || name.startsWith("xpaa_")) frame.destroy();
   }
 }

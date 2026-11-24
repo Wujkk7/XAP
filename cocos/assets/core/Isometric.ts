@@ -32,6 +32,17 @@ export class IsometricWalk {
   stop(): void { this.vx = this.vy = 0; }
   reset(): void { this.x = MAP.spawn.x; this.y = MAP.spawn.y; this.distance = 0; this.stop(); }
 
+  private moveAxis(amount:number,horizontal:boolean):void{
+    const x=this.x+(horizontal?amount:0),y=this.y+(horizontal?0:amount);
+    if(!this.isBlocked(x,y)){this.x=x;this.y=y;return;}
+    if(Math.abs(amount)<.001)return;
+    const offset=Math.min(.085,Math.abs(amount)+.02),other=horizontal?this.y:this.x,toward=other>Math.floor(other)+.5?-1:1;
+    for(const sign of [toward,-toward]){
+      const sx=x+(horizontal?0:offset*sign),sy=y+(horizontal?offset*sign:0);
+      if(!this.isBlocked(sx,sy)){this.x=sx;this.y=sy;return;}
+    }
+  }
+
   tick(seconds: number, screenX: number, screenY: number): void {
     const dt = Math.max(0, Math.min(seconds, MAX_FRAME_SECONDS));
     const length = Math.max(1, Math.hypot(screenX, screenY));
@@ -44,9 +55,8 @@ export class IsometricWalk {
     // 以小步推进，防止低帧率时越过一格障碍。
     const steps = Math.max(1, Math.ceil(Math.max(Math.abs(this.vx * dt), Math.abs(this.vy * dt)) / 0.08));
     for (let i = 0; i < steps; i++) {
-      const nx = this.x + this.vx * dt / steps, ny = this.y + this.vy * dt / steps;
-      if (!this.isBlocked(nx, this.y)) this.x = nx;
-      if (!this.isBlocked(this.x, ny)) this.y = ny;
+      this.moveAxis(this.vx*dt/steps,true);
+      this.moveAxis(this.vy*dt/steps,false);
     }
     const now = isoProject(this.x, this.y);
     this.distance += Math.hypot(now.x - old.x, now.y - old.y) / W;

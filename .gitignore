@@ -9,3 +9,5 @@ web/src/sprites.ts
 .local-checks/
 .local-backups/
 .local-sites/
+__pycache__/
+*.pyc

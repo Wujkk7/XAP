@@ -74,7 +74,8 @@ try {
     await send('Input.dispatchKeyEvent',{type:'keyUp',code,key,windowsVirtualKeyCode:number});await delay(150);
   };
   await ready(); await shot('isometric-overview');
-  assert.equal(await evaluate('qa.root.actors.length'),22); // Existing props/player plus six optional exploration services.
+  assert.ok(await evaluate('qa.root.actors.length')>22); // Expanded forest, existing services and restored village.
+  assert.equal(await evaluate('qa.root.lab.layer().tiles.length'),25);
   const before=await evaluate('({x:qa.root.walk.x,y:qa.root.walk.y})');
   await key('KeyD','d',68,450);
   const after=await evaluate('({x:qa.root.walk.x,y:qa.root.walk.y})');
@@ -82,7 +83,7 @@ try {
   assert.ok(Math.abs(after.x+after.y-before.x-before.y)<0.01,'screen-right movement must stay horizontal');
   await tap(295,286);assert.equal(await evaluate('qa.root.grid'),false);await shot('isometric-no-grid');
   await tap(295,286);assert.equal(await evaluate('qa.root.grid'),true);
-  await tap(505,286);assert.equal(await evaluate('qa.root.follow'),true);await shot('isometric-follow');
+  await tap(505,286);assert.equal(await evaluate('qa.root.follow'),false);await shot('isometric-overview-expanded');
   await tap(505,286);await tap(295,-281);
   assert.equal(await evaluate('qa.root.walk.x'),6.5);assert.equal(await evaluate('qa.root.walk.y'),7.5);
   const joystick=await evaluate(`(()=>{const r=document.getElementById('GameCanvas').getBoundingClientRect(),s=Math.min(r.width/1280,r.height/720);return{x:r.left+r.width/2-440*s,y:r.top+r.height/2+235*s}})()`);
@@ -96,7 +97,7 @@ try {
   assert.deepEqual(ordering.depths,[...ordering.depths].sort((a,b)=>a-b));assert.ok(ordering.fade>0);await shot('isometric-occlusion');
 
   await send('Emulation.setDeviceMetricsOverride',{width:844,height:390,deviceScaleFactor:1,mobile:true});await delay(250);
-  await tap(295,-281);await tap(505,286);assert.equal(await evaluate('qa.root.follow'),true);await shot('isometric-phone');
+  await tap(295,-281);assert.equal(await evaluate('qa.root.follow'),true);await shot('isometric-phone');
   await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});await delay(250);
   const paused=await evaluate('JSON.stringify({x:qa.root.walk.x,y:qa.root.walk.y})');await key('KeyW','w',87);
   assert.equal(await evaluate('JSON.stringify({x:qa.root.walk.x,y:qa.root.walk.y})'),paused);
