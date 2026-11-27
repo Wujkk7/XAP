@@ -15,10 +15,12 @@ export interface WordEntry {
 }
 
 import { WORDS_TIER1 } from "../data/external-files/Tier1Vocabulary.ts";
+import { WORDS_TIER2 } from "../data/external-files/Tier2Vocabulary.ts";
 export { WORDS_TIER1 } from "../data/external-files/Tier1Vocabulary.ts";
+export { WORDS_TIER2 } from "../data/external-files/Tier2Vocabulary.ts";
 
+export const WORDS_ALL: WordEntry[] = [...WORDS_TIER1, ...WORDS_TIER2];
 
 export function wordsByTier(tier: number): WordEntry[] {
-  // Only tier 1 ships with the MVP; other tiers join as data files later.
-  return WORDS_TIER1.filter((w) => w.tier === tier);
+  return WORDS_ALL.filter((w) => w.tier === tier);
 }

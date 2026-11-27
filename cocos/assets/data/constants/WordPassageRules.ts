@@ -2,6 +2,7 @@ export const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 export const LETTER_WEIGHTS = 'EEEEEEEEEEEAAAAAAAAARRRRRRRRIIIIIIIIOOOOOOOOTTTTTTTTNNNNNNSSSSSSLLLLLLCCCCUUUUDDDDPPPPMMMMHHHHGGGBBFFYYWWKVXZJQ';
 export const LAB_WORD_RULES = {
   chestLetters: 12,
+  worldChestLetters: 4,
   chestCoins: 20,
   shortageChance: 0.25,
   hintCost: 1,
@@ -11,6 +12,18 @@ export const LAB_WORD_RULES = {
   commonSwap: 3,
   rareSwap: 6,
   finishSeconds: 0.5,
+} as const;
+
+export const LAB_LIFT_RULES = {
+  clearSteps: 2,
+  repairMaterials: 3,
+} as const;
+
+export const LAB_UPGRADE_RULES = {
+  lampCosts: [35, 80, 150] as readonly number[],
+  lampRadiusStep: 0.75,
+  pickCosts: [30, 70, 135] as readonly number[],
+  pickSpeedStep: 0.18,
 } as const;
 
 export const LAB_SERVICES = [

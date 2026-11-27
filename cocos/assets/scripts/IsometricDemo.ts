@@ -39,6 +39,10 @@ export class IsometricDemo extends Component {
   private interactButton!: Label;
   private wordMarks!: Graphics;
   private weapon!: Label;
+  private weaponSprite!: Sprite;
+  private crackSprite!: Sprite;
+  private pickSprite!: Sprite;
+  private ladderGuide!: Label;
   private swingAge = 1;
   private wordDamage = 0;
   private finishSwing: (() => void) | null = null;
@@ -84,7 +88,7 @@ export class IsometricDemo extends Component {
   private camera!: Camera;
   private buttonResets: (() => void)[] = [];
   private lastDepth = 0;
-  private cardViews=new Map<object,Label>();
+  private cardViews=new Map<object,Node>();
 
   onLoad(): void {
     try { const raw = sys.localStorage.getItem(LAB_STORAGE_KEY); if (raw) this.words.restore(raw); }
@@ -183,8 +187,8 @@ export class IsometricDemo extends Component {
   }
   private interact(): void {
     if(this.wordUI.active||this.lab.travel)return;
-    const target=this.lab.selected();
-    if(this.words.adventure.open(target.x,target.y)){this.openWords('worldchest');return;}
+    const worldTarget=this.words.adventure.nearbyWorldTarget();
+    if(worldTarget&&this.words.adventure.open(worldTarget.x,worldTarget.y)){this.openWords('worldchest');return;}
     const p = this.words.nearby(); if (!p || this.wordUI.active) return;
     if (p.id === "seal") this.openWords("seal");
     else if (p.id.startsWith("chest")) this.openWords("chest", Number(p.id.slice(-1)));
@@ -224,10 +228,16 @@ export class IsometricDemo extends Component {
       this.skin.bind(this.frames);
       this.ensureView(this.lab.depth); this.player = this.actor(this.layerViews.get(this.lab.depth)!.actorsNode, "walk_down_0", this.walk.x, this.walk.y, 48);
       this.marker = this.make("裂纹与碎屑", this.world).addComponent(Graphics);
+      this.crackSprite = this.sprite(this.world, "fx-crack-1", W).sprite; this.crackSprite.node.active = false;
+      this.pickSprite = this.sprite(this.world, "fx-pick", 44).sprite; this.pickSprite.node.active = false;
+      this.ladderGuide = this.text(this.world, "梯子指引", "", 0, 0, 170, 22);
+      this.ladderGuide.color = this.color("ffe49a"); this.ladderGuide.enableOutline = true; this.ladderGuide.outlineWidth = 3; this.ladderGuide.outlineColor = this.color("16201a");
+      this.ladderGuide.node.active = false;
       this.pickup = this.text(this.world, "拾取提示", "矿晶 +1", 0, 0, 220, 25); this.pickup.color = this.color(C.accent);
       this.wordMarks = this.make("探索标识", this.world).addComponent(Graphics);
       this.weapon = this.text(this.world, "字母武器", "", 0, 0, 300, 58); this.weapon.color = this.color("f9d484");
       this.weapon.enableOutline = true; this.weapon.outlineColor = this.color("27392f"); this.weapon.outlineWidth = 3;
+      this.weaponSprite = this.sprite(this.world, "letter-A", 54).sprite; this.weaponSprite.node.active = false;
       this.node.on(Node.EventType.TOUCH_END, (e: EventTouch) => {
         if (this.lab.travel || this.wordUI.active) return;
         const p = e.getUILocation(), zoom = this.world.scale.x;
@@ -359,6 +369,12 @@ export class IsometricDemo extends Component {
       actors.push(this.actor(actorsNode, house.sprite, house.x + house.width / 2, house.y + house.depth, 180));
     if (depth === this.lab.depth) for (const p of this.words.services) {
       if (!this.words.serviceAt(p.x, p.y)) continue;
+      if (p.id === "lift") {
+        const a = this.actor(actorsNode, "ladder_up", p.x + .5, p.y + .5, 52);
+        a.sprite.color = this.color(this.words.repairedLifts.includes(depth) ? "63e0c2" : "a8987e");
+        actors.push(a);
+        continue;
+      }
       const art = p.id === "npc" ? "npc_trader" : p.id === "may" ? "npc_may" :
         p.id === "seal" ? "seal_arch" : p.id === "clue" ? "inscription" : "letter_chest";
       const width = p.id === "npc" || p.id === "may" ? 48 : 64;
@@ -368,12 +384,13 @@ export class IsometricDemo extends Component {
   }
 
   private lightLayers(dt: number): void {
+    const bonus = this.words.adventure.lampBonus();
     for (const [depth,v] of this.layerViews) {
       if(depth===0)continue;
       const n=this.lab.layer(depth).tiles.length;
       let fogChanged=false;
       for(let y=0;y<n;y++)for(let x=0;x<n;x++){
-        const i=y*n+x,target=labBrightness(depth,Math.hypot(x+.5-this.walk.x,y+.5-this.walk.y));
+        const i=y*n+x,target=labBrightness(depth,Math.hypot(x+.5-this.walk.x,y+.5-this.walk.y),bonus);
         v.brightness[i]=smoothBrightness(v.brightness[i],target,dt);
         const alpha=Math.round(255*(1-v.brightness[i]));
         if(v.fogAlpha[i]!==alpha){v.fogAlpha[i]=alpha;fogChanged=true;}
@@ -386,7 +403,7 @@ export class IsometricDemo extends Component {
       }
       // Upright props must disappear with their ground; a floor-only mask leaves distant chests exposed.
       for(const actor of v.actors){
-        const target=labBrightness(depth,Math.hypot(actor.x-this.walk.x,actor.y-this.walk.y));
+        const target=labBrightness(depth,Math.hypot(actor.x-this.walk.x,actor.y-this.walk.y),bonus);
         actor.brightness=smoothBrightness(actor.brightness??-1,target,dt);
         const at=isoProject(actor.x,actor.y),p=isoProject(this.walk.x,this.walk.y),h=actor.node.getComponent(UITransform)!.height;
         const fade=occlusionAlpha(at.x-p.x,p.y-at.y,actor.width,h,48,69);
@@ -460,27 +477,71 @@ export class IsometricDemo extends Component {
     const at = isoProject(target.x + 0.5, target.y + 0.5), offset = tile.kind==='wall'?LAB_WALL_HEIGHT:tile.kind==='soil'?LAB_SOIL_HEIGHT:0;
     if (this.lab.depth > 0) {
       const foot = isoProject(this.walk.x, this.walk.y), theme = LAB_THEMES[this.lab.layer().theme];
+      const lampScale = 1 + this.words.adventure.lampBonus() / LAB_LAMP.radius;
       for (let ring = 3; ring > 0; ring--) {
-        g.fillColor = this.color(theme.light + "08"); g.ellipse(foot.x, foot.y, W * ring * 0.65, H * ring * 0.65); g.fill();
+        g.fillColor = this.color(theme.light + "08"); g.ellipse(foot.x, foot.y, W * ring * 0.65 * lampScale, H * ring * 0.65 * lampScale); g.fill();
       }
+      // Upper-layer ladder wayfinder: subtle glow on ladder base + directional arrow + distance when far in darkness.
+      const entrances = this.lab.layer().entrances;
+      if (entrances.length && !this.lab.travel) {
+        let nearest = entrances[0], bestDist = Infinity;
+        for (const e of entrances) {
+          const d = Math.hypot(e.x + 0.5 - this.walk.x, e.y + 0.5 - this.walk.y);
+          if (d < bestDist) { bestDist = d; nearest = e; }
+        }
+        const entPos = isoProject(nearest.x + 0.5, nearest.y + 0.5);
+        const pulse = 0.65 + 0.35 * Math.sin(this.elapsed * 4.5);
+        g.fillColor = this.color("ffe082" + Math.round(45 * pulse).toString(16).padStart(2, "0"));
+        g.ellipse(entPos.x, entPos.y, 26, 13); g.fill();
+        if (bestDist > 2.2) {
+          const dx = entPos.x - foot.x, dy = entPos.y - foot.y, len = Math.hypot(dx, dy) || 1;
+          const ux = dx / len, uy = dy / len, px = -uy, py = ux;
+          const tipX = foot.x + ux * 102, tipY = foot.y + 24 + uy * 102;
+          const baseX = tipX - ux * 18, baseY = tipY - uy * 18;
+          this.polygon(g, [
+            { x: tipX, y: tipY },
+            { x: baseX + px * 9, y: baseY + py * 9 },
+            { x: baseX - px * 9, y: baseY - py * 9 },
+          ], "ffdf7a");
+          this.ladderGuide.node.active = true;
+          this.ladderGuide.string = "梯子 ↑ " + Math.round(bestDist) + "格";
+          this.ladderGuide.node.setPosition(tipX + ux * 26, tipY - this.lab.depth * LAB_LAYER_GAP + uy * 18);
+          this.ladderGuide.node.setSiblingIndex(this.world.children.length - 1);
+        } else {
+          this.ladderGuide.node.active = false;
+        }
+      } else {
+        this.ladderGuide.node.active = false;
+      }
+    } else {
+      this.ladderGuide.node.active = false;
     }
     g.strokeColor = this.color(C.accent); g.lineWidth = 2;
     this.polygon(g, [isoProject(target.x, target.y), isoProject(target.x + 1, target.y), isoProject(target.x + 1, target.y + 1), isoProject(target.x, target.y + 1)].map(p => ({ x: p.x, y: p.y + offset })));
     if (damage > .01 && !this.lab.travel) {
-      const phase = Math.ceil(damage * 3), cx = at.x, cy = at.y + offset;
-      g.strokeColor = this.color("201d19"); g.lineWidth = 2 + damage;
-      g.moveTo(cx - 15, cy + 7); g.lineTo(cx - 3, cy); g.lineTo(cx + 6, cy - 8);
-      if (phase >= 2) { g.moveTo(cx - 3, cy); g.lineTo(cx + 15, cy + 5); g.lineTo(cx + 28, cy + 4); }
-      if (phase >= 3) { g.moveTo(cx - 15, cy + 7); g.lineTo(cx - 31, cy + 4); g.moveTo(cx + 6, cy - 8); g.lineTo(cx + 22, cy - 12); } g.stroke();
+      const phase = Math.min(3, Math.max(1, Math.ceil(damage * 3))), cx = at.x, cy = at.y + offset;
+      const crackFrame = this.frames.get("fx-crack-" + phase);
+      if (crackFrame) {
+        this.crackSprite.spriteFrame = crackFrame;
+        this.crackSprite.node.active = true;
+        this.crackSprite.node.setPosition(cx, cy - this.lab.depth * LAB_LAYER_GAP);
+        this.crackSprite.node.setSiblingIndex(this.world.children.length - 1);
+      }
       const floor = this.layerViews.get(this.lab.depth)?.floors.get(target.x + "," + target.y);
       if (floor) floor.setPosition(at.x + Math.sin(this.elapsed * 100) * (this.striking ? 1.2 : 0), at.y);
-      // 镐柄与镐头围绕角色手部挥动；角色贴图本身不变形。
       if (!this.wordUI.active) {
-      const player = isoProject(this.walk.x, this.walk.y), swing = Math.sin(this.elapsed * 18), dx = at.x - player.x;
-      const hx = player.x + (dx >= 0 ? 18 : -18), hy = player.y + 22;
-      g.strokeColor = this.color("be9b65"); g.lineWidth = 4; g.moveTo(hx, hy); g.lineTo(hx + swing * 21, hy + 18 - swing * 8); g.stroke();
-      g.strokeColor = this.color("d4dbda"); g.moveTo(hx + swing * 21 - 10, hy + 16 - swing * 8); g.lineTo(hx + swing * 21 + 9, hy + 24 - swing * 8); g.stroke();
+        const player = isoProject(this.walk.x, this.walk.y), swing = Math.sin(this.elapsed * 18), dx = at.x - player.x;
+        this.pickSprite.node.active = true;
+        this.pickSprite.node.setPosition(player.x + (dx >= 0 ? 22 : -22) + swing * 12, player.y - this.lab.depth * LAB_LAYER_GAP + 34 - swing * 6);
+        this.pickSprite.node.setScale(dx >= 0 ? 1 : -1, 1, 1);
+        this.pickSprite.node.setRotationFromEuler(0, 0, (dx >= 0 ? -1 : 1) * (15 + swing * 48));
+        this.pickSprite.node.setSiblingIndex(this.world.children.length - 1);
+      } else {
+        this.pickSprite.node.active = false;
       }
+    } else {
+      this.crackSprite.node.active = false;
+      this.pickSprite.node.active = false;
     }
     this.sinks = this.sinks.filter(s => s.age < 0.4);
     for (const s of this.sinks) {
@@ -566,23 +627,44 @@ export class IsometricDemo extends Component {
     if (travel) this.player.node.setSiblingIndex(this.world.children.length - 1);
     this.marker.node.setPosition(0, -this.lab.depth * LAB_LAYER_GAP);
     this.drawEffects(dt);
-    const drops=this.words.adventure.drops;
-    for(const [drop,label]of this.cardViews)if(!drops.includes(drop as typeof drops[number])){label.node.destroy();this.cardViews.delete(drop);}
+    const drops=this.words.adventure.drops, bonus=this.words.adventure.lampBonus();
+    for(const [drop,card]of this.cardViews)if(!drops.includes(drop as typeof drops[number])){card.destroy();this.cardViews.delete(drop);}
     for(const drop of drops){
-      let label=this.cardViews.get(drop);if(!label){label=this.text(this.world,'掉落词卡',drop.word,0,0,150,23);this.cardViews.set(drop,label);}
-      const at=isoProject(drop.x+.5,drop.y+.5);label.node.setPosition(at.x,at.y-drop.depth*LAB_LAYER_GAP+24+Math.sin(this.elapsed*3)*3);
-      label.node.active=drop.depth===this.lab.depth;label.color=this.color('f1dfa3'+Math.round(255*labBrightness(drop.depth,Math.hypot(drop.x+.5-this.walk.x,drop.y+.5-this.walk.y))).toString(16).padStart(2,'0'));
+      let card=this.cardViews.get(drop);
+      if(!card){
+        card=this.make('掉落词卡',this.world,0,0,150,42);
+        this.sprite(card,'fx-wordcard',34);
+        const lbl=this.text(card,'词卡字',drop.word,0,22,150,21);
+        lbl.enableOutline=true;lbl.outlineWidth=2;lbl.outlineColor=this.color('16201a');
+        card.addComponent(UIOpacity);
+        this.cardViews.set(drop,card);
+      }
+      const at=isoProject(drop.x+.5,drop.y+.5);card.setPosition(at.x,at.y-drop.depth*LAB_LAYER_GAP+22+Math.sin(this.elapsed*3)*3);
+      card.active=drop.depth===this.lab.depth;
+      const light=labBrightness(drop.depth,Math.hypot(drop.x+.5-this.walk.x,drop.y+.5-this.walk.y),bonus);
+      card.getComponent(UIOpacity)!.opacity=Math.round(255*light);
     }
-    this.weapon.node.active = this.swingAge < (this.finishSwing ? LAB_WORD_RULES.finishSeconds : .26);
-    if (this.weapon.node.active) {
+    const weaponActive = this.swingAge < (this.finishSwing ? LAB_WORD_RULES.finishSeconds : .26);
+    const singleLetterFrame = weaponActive && this.weapon.string.length === 1 ? this.frames.get("letter-" + this.weapon.string) : undefined;
+    this.weapon.node.active = weaponActive && !singleLetterFrame;
+    this.weaponSprite.node.active = weaponActive && !!singleLetterFrame;
+    if (weaponActive) {
       const phase = Math.min(1,this.swingAge/(this.finishSwing ? LAB_WORD_RULES.finishSeconds : .26));
-      this.weapon.node.setPosition(p.x + 25 + Math.sin(phase*Math.PI)*28,p.y-this.lab.depth*LAB_LAYER_GAP+38+Math.sin(phase*Math.PI)*44);
-      this.weapon.node.setRotationFromEuler(0,0,65-phase*125); this.weapon.node.setScale(this.finishSwing ? 1.25 : 1,1,1);
-      this.weapon.node.setSiblingIndex(this.world.children.length-1);
+      const wx = p.x + 25 + Math.sin(phase*Math.PI)*28, wy = p.y-this.lab.depth*LAB_LAYER_GAP+38+Math.sin(phase*Math.PI)*44;
+      if (singleLetterFrame) {
+        this.weaponSprite.spriteFrame = singleLetterFrame;
+        this.weaponSprite.node.setPosition(wx, wy);
+        this.weaponSprite.node.setRotationFromEuler(0, 0, 65 - phase * 125);
+        this.weaponSprite.node.setSiblingIndex(this.world.children.length - 1);
+      } else {
+        this.weapon.node.setPosition(wx, wy);
+        this.weapon.node.setRotationFromEuler(0,0,65-phase*125); this.weapon.node.setScale(this.finishSwing ? 1.25 : 1,1,1);
+        this.weapon.node.setSiblingIndex(this.world.children.length-1);
+      }
     }
     this.wordMarks.node.setPosition(0,-this.lab.depth*LAB_LAYER_GAP);this.wordMarks.clear();
     this.wordMarks.strokeColor=this.color("e2bf72");this.wordMarks.lineWidth=2;
-    const nearby=this.words.nearby();
+    const nearby=this.words.adventure.nearbyWorldTarget()??this.words.nearby();
     if(nearby){this.diamond(this.wordMarks,nearby.x,nearby.y);this.wordMarks.node.setSiblingIndex(this.world.children.length-1);}
     this.interactButton.string=nearby?nearby.title+" · 互动":"探索互动 · E";
     this.interactButton.color=this.color(nearby?C.ink:C.muted);
@@ -592,7 +674,8 @@ export class IsometricDemo extends Component {
     const action = targetTile.kind === "ore" ? "敲开矿晶" : targetTile.kind==='soil'?'挖开土层':targetTile.kind==='wall'?'凿开岩壁':["root", "tree", "rock"].includes(targetTile.kind) ? "敲开障碍" : "砸穿地面";
     this.impactButton.string = travel ? (travel.to > travel.from ? "下潜中…" : "返回中…") : action + "\n点按 / 空格";
     const unlocked=this.lab.canDescend(this.lab.depth);
-    this.readout.string = damage > 0 ? "地块裂开 " + Math.round(damage * 100) + "%" : nearby ? nearby.title+" · 点互动 / E" : unlocked?'封印已解除 · 可继续探索或下潜':this.words.room.answer?'寻找本层封印 · 先寻宝、采集和收集字母':'暂无未见新词 · 返回已探索地层，等待词库扩充';
+    const guide=this.lab.depth>0?'探索外围黑暗寻找线索碑、宝箱与墙后洞室':'寻找本层封印 · 先寻宝、采集和收集字母';
+    this.readout.string = damage > 0 ? "地块裂开 " + Math.round(damage * 100) + "%" : nearby ? nearby.title+" · 点互动 / E" : unlocked?'封印已解除 · 可继续探索或下潜':this.words.room.answer?guide:'暂无未见新词 · 返回已探索地层，等待词库扩充';
     if (this.lab.message !== this.lastMessage) { this.lastMessage = this.lab.message; this.notice.string = this.lab.message; this.noticeTime = 3.5; }
     this.noticeTime = Math.max(0, this.noticeTime - dt); this.notice.node.active = this.noticeTime > 0;
     if(this.saveError){this.notice.string=this.saveError;this.notice.node.active=true;}

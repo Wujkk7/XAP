@@ -43,7 +43,10 @@ export function makeLabLayer(depth: number, excavation = true): LabLayer {
     if(x>=MAP.size||y>=MAP.size){
       const tile=getTile(LAB_WORLD_SEED,x,y,depth),h=hashCoords(LAB_WORLD_SEED,x,y,depth,702);
       kind=depth===0?(tile.type==='tree'?'tree':tile.type==='surface_rock'?'rock':'floor')
-        :tile.type==='chest'?'chest':tile.type.startsWith('ore_')?'ore':h%7===0?(theme===1?'root':'wall'):'floor';
+        :tile.type==='chest'?'chest':tile.type.startsWith('ore_')?'ore'
+        :depth>=3&&h%19===0?'water'
+        :depth>=3&&h%13===0?'ore'
+        :h%7===0?(theme===1?'root':'wall'):'floor';
       if(x===6||y===6||x%8===0||y%8===0)kind='path';
     }
     if(depth===0){
@@ -53,8 +56,9 @@ export function makeLabLayer(depth: number, excavation = true): LabLayer {
     return { kind, hole: false, damage: 0 };
   }));
   if(depth>0){const p=guaranteedChestPos(LAB_WORLD_SEED,0,0,depth);
-    // Keep guaranteed treasure outside the service/landing cross, still inside its 25x25 block.
-    if((p.x===6&&[4,5,7,8,10].includes(p.y))||(p.y===6&&[5,7,8].includes(p.x)))p.x=20;
+    // Keep guaranteed treasure outside central & scattered underground service tiles.
+    const hitsService=(p.x===6&&[4,5,7,8,10,16,18].includes(p.y))||(p.y===6&&[5,7,8,10,14,16].includes(p.x))||(p.x===16&&p.y===16);
+    if(hitsService){p.x=20;p.y=20;}
     tiles[p.y][p.x].kind='chest';}
   const layer={ depth, theme, tiles, entrances: [], revision: 0 };
   if(excavation){addLabExcavations(layer);addLabChambers(layer);}
@@ -110,6 +114,7 @@ export class LayeredLab {
   depth = 0;
   maxDepth = 0;
   resources = 0;
+  digSpeed = 1;
   private _target: { x: number; y: number } | null = null;
   private manualTarget=false;
   get target(): {x:number;y:number}|null{return this._target;}
@@ -122,6 +127,7 @@ export class LayeredLab {
   canDescend: (depth: number) => boolean = () => true;
   canLand: (x:number,y:number,depth:number) => boolean = () => true;
   canAutoTarget:(x:number,y:number)=>boolean=()=>true;
+  onBeforeDescend?: (fromDepth: number) => string | void;
   private releaseRequired = false;
   private damageKey = "";
   private hitStage = 0;
@@ -184,18 +190,29 @@ export class LayeredLab {
   private descend(x: number, y: number): void {
     if(!this.canDescend(this.depth)){this.message='先破解本层封印，才能进入新的下层';return;}
     const below=this.tile(x,y,this.depth+1);
-    if(!this.canLand(x,y,this.depth+1)||below&&['chest','stubborn','village'].includes(below.kind)){this.message='下方有宝藏或封印，换一格下潜再探索';return;}
+    if(!this.canLand(x,y,this.depth+1)||below&&['chest','stubborn','village','relic','pack_part'].includes(below.kind)){this.message='下方有宝藏或封印，换一格下潜再探索';return;}
     this.clearLanding(this.depth + 1, x, y);
+    const reminder = this.onBeforeDescend?.(this.depth);
     this.travel = { from: this.depth, to: this.depth + 1, x, y, elapsed: 0 };
     this.walk.stop(); this.target = null; this.releaseRequired = true;
-    this.message = "地面坍塌了，下面还有一层…";
+    this.message = reminder || "地面坍塌了，下面还有一层…";
+  }
+  warpTo(depth: number, x: number, y: number): boolean {
+    if (this.travel || depth < 0 || depth === this.depth) return false;
+    const target = this.layer(depth);
+    if (!open(target.tiles[y][x])) target.tiles[y][x] = { kind: "path", hole: false, damage: 0 };
+    target.revision++;
+    this.travel = { from: this.depth, to: depth, x, y, elapsed: 0 };
+    this.walk.stop(); this.target = null; this.releaseRequired = true;
+    this.message = depth === 0 ? "搭乘升降站返回地表营地…" : "搭乘升降站前往第 " + (depth + 1) + " 层…";
+    return true;
   }
   openPassage(x: number, y: number): void {
     const tile = this.tile(x, y)!;
     tile.kind = "path"; tile.hole = true; tile.damage = 0;
     this.layer().revision++;
     const below=this.tile(x,y,this.depth+1);
-    if(this.canLand(x,y,this.depth+1)&&(!below||!['chest','stubborn','village'].includes(below.kind)))this.clearLanding(this.depth + 1, x, y);
+    if(this.canLand(x,y,this.depth+1)&&(!below||!['chest','stubborn','village','relic','pack_part'].includes(below.kind)))this.clearLanding(this.depth + 1, x, y);
     this.effect("collapse", x, y); this.message = "符文通道打开了 · 走入缺口可下潜，入口可原路返回";
   }
   ascend(): boolean {
@@ -229,7 +246,7 @@ export class LayeredLab {
     }
     const key = this.depth + ":" + x + ":" + y;
     if (key !== this.damageKey) { this.damageKey = key; this.hitStage = Math.floor(tile.damage * 3); }
-    tile.damage = Math.min(1, tile.damage + dt / (LAB_BREAK_SECONDS * LAB_THEMES[this.layer().theme].toughness));
+    tile.damage = Math.min(1, tile.damage + (dt * this.digSpeed) / (LAB_BREAK_SECONDS * LAB_THEMES[this.layer().theme].toughness));
     const stage = Math.floor(tile.damage * 3);
     if (stage > this.hitStage) { this.hitStage = stage; this.effect("hit", x, y); }
     if (tile.damage < 1) return;

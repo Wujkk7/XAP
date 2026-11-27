@@ -5,7 +5,7 @@ import assert from "node:assert";
 import { hashString } from "../cocos/assets/core/rng.ts";
 import { stratumAt } from "../cocos/assets/core/strata.ts";
 import { getTile, genChunk, guaranteedChestPos, CHEST_BLOCK } from "../cocos/assets/core/worldgen.ts";
-import { WORDS_TIER1 } from "../cocos/assets/core/vocab.ts";
+import { WORDS_TIER1, WORDS_TIER2, WORDS_ALL, wordsByTier } from "../cocos/assets/core/vocab.ts";
 import { ChestSession, makeQuestion, REWARD_STEPS } from "../cocos/assets/core/quiz.ts";
 import { MasteryBook, pickChestWord } from "../cocos/assets/core/mastery.ts";
 import { newSave, setDiff, getDiff, placeStubborn, addItem, serializeSave, deserializeSave } from "../cocos/assets/data/player-data/save.ts";
@@ -648,7 +648,7 @@ check('v1 lab saves expand around their unchanged 13x13 terrain, preserving bala
   const copy=new WordPassages(new LayeredLab());copy.restore(JSON.stringify(s));
   assert.equal(copy.lab.layer().tiles.length,25);assert.deepEqual(copy.lab.layer().tiles.slice(0,13).map(row=>row.slice(0,13)),s.layers.find((l:any)=>l.depth===1).tiles);
   assert.equal(copy.coins,42);assert.ok(copy.lab.canDescend(0));assert.equal(copy.lab.canDescend(1),false);
-  assert.equal(copy.lab.layer(2).tiles.length,25);assert.equal(JSON.parse(copy.snapshot()).version,4);
+  assert.equal(copy.lab.layer(2).tiles.length,25);assert.equal(JSON.parse(copy.snapshot()).version,5);
   const before=copy.snapshot(),bad=JSON.parse(before);bad.adventure.game.inventory.coin=-1;
   assert.throws(()=>copy.restore(JSON.stringify(bad)));assert.equal(copy.snapshot(),before);
 });
@@ -714,7 +714,7 @@ check('v2 excavation migration preserves mined walls, holes, partial work, playe
   assert.ok(copy.lab.layer().tiles.flat().some(t=>t.kind==='soil'));
   const soil=copy.lab.layer().tiles.flat().find(t=>t.kind==='soil')!;soil.kind='floor';
   const raw=copy.snapshot(),again=new WordPassages(new LayeredLab());again.restore(raw);assert.equal(again.snapshot(),raw);
-  assert.equal(JSON.parse(raw).version,4);assert.equal(again.legacyDepth,w.legacyDepth);
+  assert.equal(JSON.parse(raw).version,5);assert.equal(again.legacyDepth,w.legacyDepth);
 });
 
 check('diggable banks are deterministic, leave guaranteed chests and village routes intact, and survive extended auto-mining',()=>{
@@ -781,7 +781,7 @@ check('second-stage letter hint costs materials and v3 saves migrate cleanly to 
   const s=JSON.parse(w.snapshot());s.version=3;delete s.adventure.capacity;delete s.adventure.expanded;delete s.adventure.relics;delete s.adventure.relicDex;
   s.layers.find((l:any)=>l.depth===1).tiles=makeLabLayer(1,false).tiles;
   const copy=new WordPassages(new LayeredLab());copy.restore(JSON.stringify(s));
-  assert.equal(JSON.parse(copy.snapshot()).version,4);
+  assert.equal(JSON.parse(copy.snapshot()).version,5);
   assert.equal(copy.adventure.capacity,6);assert.equal(copy.rooms['0'].letterHint,true);
   assert.ok(copy.lab.layer(1).tiles.flat().some(t=>t.kind==='relic'));
   const raw=copy.snapshot(),bad=JSON.parse(raw);bad.adventure.capacity=2;
@@ -816,6 +816,140 @@ check('art-v101 sprite atlases and standalone UI PNGs cover all required v1.0.1 
     const png=readFileSync(new URL('ui/'+rel+'.png',root));
     assert.equal(png.toString('ascii',1,4),'PNG','ui/'+rel+'.png');
     readFileSync(new URL('ui/'+rel+'.png.meta',root),'utf8');
+  }
+});
+
+check('mastery enforces review depth gap and preserves mistakes on wrong-then-right chests',()=>{
+  const book=new MasteryBook();
+  book.recordAnswer('gold',true,10);
+  const tooSoon=book.recordAnswer('gold',true,10);
+  assert.equal(tooSoon.state.status,'learning','same-depth repeat cannot bypass spaced repetition');
+  assert.equal(tooSoon.becameMastered,false);
+  const spaced=book.recordAnswer('gold',true,25);
+  assert.equal(spaced.state.status,'mastered');assert.equal(spaced.becameMastered,true);
+
+  const lab=new LayeredLab(),w=new WordPassages(lab),a=w.adventure;
+  lab.depth=1;lab.maxDepth=1;w.prepare();lab.walk.x=14.5;lab.walk.y=8.5;lab.layer().tiles[8][15].kind='chest';
+  assert.ok(a.open(15,8));const q=a.quiz!.session.question;
+  assert.equal(a.answer((q.correctIndex+1)%4).opened,false);
+  const res=a.answer(q.correctIndex);assert.ok(res.opened&&res.correct);
+  assert.equal(a.book.get(q.word).wrongCount,1,'wrong-then-right must retain mistake');
+  assert.ok(Object.values(a.game.stubborn).includes(q.word),'wrong-then-right must schedule stubborn stone');
+});
+
+check('pickChestWord selects words by depth stratum tier instead of pool maximum tier',()=>{
+  const book=new MasteryBook();
+  const pool=[
+    ...WORDS_TIER1.slice(0,3),
+    {word:'basalt',meaning:'玄武岩',tier:2,theme:'rock',example:'Dark basalt wall.',distractors:['泥土','砂岩','木头']},
+  ];
+  const shallow=pickChestWord(pool,book,1,()=>0.2);
+  assert.equal(shallow?.tier,1,'1m depth must draw tier 1, not tier 2');
+  const preview=pickChestWord(pool,book,1,()=>0.95);
+  assert.equal(preview?.tier,2,'10% preview band draws next tier');
+  const deep=pickChestWord(pool,book,40,()=>0.2);
+  assert.equal(deep?.tier,2,'40m depth (stratum 2) draws tier 2');
+});
+
+check('full-bag overflow keeps resource counts accurate, persists pendingLoot across reload, and backs up pack_part',()=>{
+  const lab=new LayeredLab(),w=new WordPassages(lab),adv=w.adventure;
+  adv.game.inventory={wood:1,stone:1,dirt:1,ore_copper:1,ore_iron:1,ore_silver:1};lab.resources=6;
+  lab.depth=2;lab.maxDepth=2;w.prepare();lab.walk.x=14.5;lab.walk.y=8.5;
+  lab.layer().tiles[8][15]={kind:'ore',hole:false,damage:0};lab.select(15,8);
+  // depth 2 ore is ore_copper (already stacked), switch to depth 31 (stratum 2 -> ore_iron) or depth 101 (ore_gold -> new slot)
+  lab.depth=101;lab.maxDepth=101;w.prepare();lab.walk.x=14.5;lab.walk.y=8.5;
+  lab.layer().tiles[8][15]={kind:'ore',hole:false,damage:0};lab.select(15,8);
+  for(let i=0;i<10&&!adv.pendingLoot;i++){lab.tick(.01,0,0,false);lab.tapStrike();}
+  assert.ok(adv.pendingLoot&&adv.pendingLoot.kind==='material');
+  assert.equal(lab.resources,6,'overflow material must not inflate lab.resources before acceptance');
+  const saved=w.snapshot(),copy=new WordPassages(new LayeredLab());copy.restore(saved);
+  assert.deepEqual(copy.adventure.pendingLoot,adv.pendingLoot,'pendingLoot must survive reload');
+  copy.adventure.resolvePending();assert.equal(copy.lab.resources,6,'discarding overflow must not underflow resources');
+
+  // Backup pack_part at depth 4 when depth 1 part was not collected/expanded.
+  const bLab=new LayeredLab(),bW=new WordPassages(bLab);
+  bLab.depth=4;bW.prepare();
+  assert.ok(bLab.layer(4).tiles.flat().some(t=>t.kind==='pack_part'),'depth 4 must offer backup pack_part if unexpanded');
+});
+
+check('nearbyWorldTarget finds adjacent chests, exhausted hint refuses charge, and pits protect chamber relics',()=>{
+  const lab=new LayeredLab(),w=new WordPassages(lab);
+  lab.depth=1;w.prepare();lab.walk.x=14.5;lab.walk.y=8.5;
+  lab.layer().tiles[8][15]={kind:'chest',hole:false,damage:0};
+  const near=w.adventure.nearbyWorldTarget();
+  assert.deepEqual(near,{x:15,y:8,kind:'chest',title:'探索宝箱'});
+  // Exhausted seal pool must not charge material for hint()
+  w.room.answer='';lab.resources=3;assert.equal(w.hint(),false);assert.equal(lab.resources,3);
+  // Descending onto a chamber relic below must be refused
+  w.legacyDepth=2;lab.depth=0;lab.walk.x=14.5;lab.walk.y=8.5;
+  lab.tile(14,8,0)!.kind='floor';lab.tile(14,8,0)!.hole=true;
+  lab.layer(1).tiles[8][14]={kind:'relic',hole:false,damage:0};
+  lab.tapStrike();assert.equal(lab.travel,null);assert.equal(lab.tile(14,8,1)!.kind,'relic');
+});
+
+check('tier-2 vocabulary has 20 valid A2 entries and integrates into WORDS_ALL',()=>{
+  assert.equal(WORDS_TIER2.length,20);assert.equal(WORDS_ALL.length,40);assert.equal(wordsByTier(2).length,20);
+  for(const w of WORDS_TIER2){
+    assert.equal(w.tier,2);assert.equal(w.distractors.length,3);
+    assert.equal(new Set(w.distractors).size,3,w.word);
+    assert.ok(!w.distractors.includes(w.meaning),w.word);
+    assert.ok(w.example.toLowerCase().includes(w.word),w.word);
+  }
+});
+
+check('lift stations require track clearing + materials, allow free ascent, and enforce seal for descent',()=>{
+  const lab=new LayeredLab(),w=new WordPassages(lab);
+  lab.depth=1;lab.maxDepth=1;w.prepare();
+  assert.equal(w.repairLift(1),false,'cannot repair before clearing track');
+  assert.ok(w.clearLiftTrack(1));assert.ok(w.clearLiftTrack(1));assert.equal(w.clearLiftTrack(1),false);
+  assert.equal(w.repairLift(1),false,'cannot repair without 3 materials');
+  w.adventure.game.inventory.stone=3;lab.resources=3;
+  assert.ok(w.repairLift(1));assert.equal(lab.resources,0);assert.ok(w.repairedLifts.includes(1));
+  // Unbroken depth-1 seal still allows riding UP to surface!
+  assert.equal(w.canLiftTo(0),true);assert.ok(w.rideLift(0));
+  for(let i=0;i<30;i++)lab.tick(.05,0,0,false);
+  assert.equal(lab.depth,0);assert.equal(Math.floor(lab.walk.x),4);
+  // Riding DOWN from surface to depth 1 requires depth 0 seal broken!
+  assert.equal(w.canLiftTo(1),false,'cannot ride down past unbroken surface seal');
+  w.rooms['0'].opened=true;
+  assert.equal(w.canLiftTo(1),true);assert.ok(w.rideLift(1));
+  for(let i=0;i<30;i++)lab.tick(.05,0,0,false);
+  assert.equal(lab.depth,1);assert.equal(Math.floor(lab.walk.x),10);
+  // Descending past an unrepaired floor emits a return-distance reminder
+  lab.depth=2;lab.maxDepth=2;w.prepare();w.rooms['2'].opened=true;
+  lab.walk.x=6.5;lab.walk.y=7.5;lab.tile(6,7)!.hole=true;lab.tapStrike();
+  assert.ok(lab.travel);assert.ok(lab.message.includes('升降站未修'));
+});
+
+check('camp lamp & pick upgrades expand light and digging speed, world chests grant letters, and depth 4+ varies terrain',()=>{
+  const lab=new LayeredLab(),w=new WordPassages(lab),adv=w.adventure;
+  assert.equal(adv.upgradeLamp().ok,false);assert.equal(adv.upgradePick().ok,false);
+  w.coins=200;
+  const beforeLight=labBrightness(1,3.6,adv.lampBonus());
+  assert.ok(adv.upgradeLamp().ok);assert.equal(adv.lampLevel,1);
+  assert.ok(labBrightness(1,3.6,adv.lampBonus())>beforeLight);
+  assert.ok(adv.upgradePick().ok);assert.equal(adv.pickLevel,1);assert.ok(lab.digSpeed>1);
+  const letters=w.grantWorldChestLetters(15,8,1);assert.equal(letters.length,4);
+  const deep=makeLabLayer(4);assert.deepEqual(deep,makeLabLayer(4));
+  assert.ok(deep.tiles.flat().some(t=>t.kind==='water'),'depth 4+ should include outer underground water variant');
+});
+
+check('v4 lab saves migrate cleanly to v5 and reject corrupt lift or upgrade state',()=>{
+  const w=new WordPassages(new LayeredLab());
+  w.lab.depth=1;w.lab.maxDepth=1;w.prepare();
+  const s=JSON.parse(w.snapshot());s.version=4;delete s.repairedLifts;delete s.liftCleared;delete s.adventure.lampLevel;delete s.adventure.pickLevel;
+  const copy=new WordPassages(new LayeredLab());copy.restore(JSON.stringify(s));
+  assert.equal(JSON.parse(copy.snapshot()).version,5);
+  assert.deepEqual(copy.repairedLifts,[0]);assert.equal(copy.adventure.lampLevel,0);assert.equal(copy.adventure.pickLevel,0);
+  const valid=copy.snapshot();
+  for(const mutate of [
+    (x:any)=>{x.repairedLifts=[1];},
+    (x:any)=>{x.adventure.lampLevel=9;},
+    (x:any)=>{x.liftCleared={'1':99};},
+  ]){
+    const bad=JSON.parse(valid);mutate(bad);
+    assert.throws(()=>copy.restore(JSON.stringify(bad)));
+    assert.equal(copy.snapshot(),valid);
   }
 });
 

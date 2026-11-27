@@ -6,6 +6,7 @@
 // so continued digging naturally re-encounters it (DESIGN.md: 单词掌握度).
 
 import { hashString } from "./rng.ts";
+import { stratumAt } from "./strata.ts";
 import type { WordEntry } from "./vocab.ts";
 import { REVIEW_GAP_M, STUBBORN_MIN, STUBBORN_SPAN } from "../data/constants/GameRules.ts";
 
@@ -45,22 +46,27 @@ export class MasteryBook {
     return s;
   }
 
-  recordAnswer(word: string, correct: boolean, depth: number): AnswerOutcome {
+  recordAnswer(word: string, correct: boolean, depth: number, hadMistake = !correct): AnswerOutcome {
     const s = this.get(word);
     s.encounters++;
     s.lastSeenDepth = depth;
     let becameMastered = false;
     let stubbornDepth: number | undefined;
 
-    if (correct) {
-      s.correctStreak++;
-      if (s.status !== "mastered" && s.correctStreak >= 2) {
-        s.status = "mastered";
-        becameMastered = true;
-      } else if (s.status === "unknown") {
+    if (correct && !hadMistake) {
+      if (s.status === "unknown" || s.correctStreak === 0) {
+        s.correctStreak = 1;
         s.status = "learning";
+        s.dueDepth = depth + REVIEW_GAP_M;
+      } else if (depth >= s.dueDepth) {
+        s.correctStreak++;
+        if (s.status !== "mastered" && s.correctStreak >= 2) {
+          s.status = "mastered";
+          becameMastered = true;
+        }
+        s.dueDepth = depth + REVIEW_GAP_M;
       }
-      s.dueDepth = depth + REVIEW_GAP_M;
+      // Correct again before dueDepth does not bypass spaced repetition.
     } else {
       s.correctStreak = 0;
       s.wrongCount++;
@@ -109,7 +115,9 @@ export function pickChestWord(
 ): WordEntry | undefined {
   if (pool.length === 0) return undefined;
   const tiers = [...new Set(pool.map((w) => w.tier))].sort((a, b) => a - b);
-  const currentTier = tiers[tiers.length - 1];
+  const targetTier = stratumAt(Math.max(1, depth)).vocabTier;
+  const eligible = tiers.filter((t) => t <= targetTier);
+  const currentTier = eligible.length > 0 ? eligible[eligible.length - 1] : tiers[0];
   const rollPick = rand();
 
   const due = book.dueWords(depth)

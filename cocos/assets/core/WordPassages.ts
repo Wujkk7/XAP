@@ -4,7 +4,7 @@ import { hashCoords } from './rng.ts';
 import { ChestSession } from './quiz.ts';
 import { WORDS_TIER1 } from './vocab.ts';
 import { PASSAGE_WORDS } from '../data/external-files/PassageWords.ts';
-import { LETTERS, LETTER_WEIGHTS, LAB_WORD_RULES as RULE, LAB_SERVICES } from '../data/constants/WordPassageRules.ts';
+import { LETTERS, LETTER_WEIGHTS, LAB_WORD_RULES as RULE, LAB_SERVICES, LAB_LIFT_RULES } from '../data/constants/WordPassageRules.ts';
 import { LabAdventure } from './LabAdventure.ts';
 import { LAB_VILLAGE } from '../data/external-files/LabVillage.ts';
 import { LAB_MAP_SIZE } from '../data/constants/IsometricRules.ts';
@@ -16,6 +16,8 @@ export class WordPassages {
   correct: Record<string, number> = {};
   rooms: Record<string, WordLayer> = {};
   tracked = '';
+  repairedLifts: number[] = [0];
+  liftCleared: Record<string, number> = {};
   adventure: LabAdventure;
   legacyDepth = 0;
   get coins():number{return this.adventure.game.inventory.coin??0;}
@@ -29,19 +31,27 @@ export class WordPassages {
     lab.canDescend=d=>d<this.legacyDepth||!!this.rooms[String(d)]?.opened;
     lab.canLand=(x,y,d)=>!this.adventure.game.stubborn[x+','+y+','+d];
     lab.canAutoTarget=(x,y)=>!this.serviceAt(x,y);
+    lab.onBeforeDescend = from => {
+      if (from > 0 && !this.repairedLifts.includes(from)) {
+        const dist = this.nearestRepairedDistance(from + 1);
+        return '提示：第 ' + (from + 1) + ' 层升降站未修 · 最近已修站距下层 ' + dist + ' 层';
+      }
+    };
     this.prepare();
   }
   get services(): { id: string; x: number; y: number; title: string }[] {
     const d = this.lab.depth;
     if (d === 0) {
       const services = LAB_SERVICES.map(p => ({ ...p })) as { id: string; x: number; y: number; title: string }[];
+      services.push({ id: 'lift', x: 4, y: 6, title: '营地升降总站' });
       if (this.lab.layer().tiles.length > 13) services.push({ id: 'may', x: LAB_VILLAGE.npc.x, y: LAB_VILLAGE.npc.y, title: LAB_VILLAGE.npc.name });
       return services;
     }
-    // Underground: keep seal + merchant near entry as goals; scatter clue & chests along outer dark roads to drive real exploration.
+    // Underground: keep seal + merchant near entry; place lift station separately on main road; scatter clue & chests into dark outer roads.
     return [
       { id: 'seal', x: 6, y: d % 2 ? 4 : 5, title: '符文通道' },
       { id: 'npc', x: 7, y: 6, title: '兑换商人' },
+      { id: 'lift', x: 10, y: 6, title: this.repairedLifts.includes(d) ? '升降站 · 可通行' : '损坏的升降站' },
       { id: 'clue', x: d % 2 ? 16 : 6, y: d % 2 ? 6 : 16, title: '线索碑' },
       { id: 'chest0', x: 14, y: 6, title: '字母宝箱' },
       { id: 'chest1', x: 6, y: 18, title: '字母宝箱' },
@@ -57,6 +67,13 @@ export class WordPassages {
       this.rooms[id] = { answer, discovered: false, learned: false, hint: false, letterHint: false, opened: false, chests: [], attempts: [0, 0, 0] };
       const layer = this.lab.layer();
       for (const p of this.services) if (p.id!=='may'&&!layer.tiles[p.y][p.x].hole && !layer.entrances.some(e => e.x === p.x && e.y === p.y)) layer.tiles[p.y][p.x] = { kind: 'path', hole: false, damage: 0 };
+      // Backup pack_part spawn every 3 underground floors if player discarded/missed depth 1's part.
+      const hasPart = this.adventure.expanded || this.adventure.relics.some(r => r.kind === 'pack_part') || (this.adventure.pendingLoot?.kind === 'relic' && this.adventure.pendingLoot.relic.kind === 'pack_part');
+      if (depth >= 2 && depth % 3 === 1 && !hasPart) {
+        const relicTiles: { x: number; y: number }[] = [];
+        layer.tiles.forEach((row, y) => row.forEach((t, x) => { if (t.kind === 'relic') relicTiles.push({ x, y }); }));
+        if (relicTiles.length >= 2) layer.tiles[relicTiles[1].y][relicTiles[1].x].kind = 'pack_part';
+      }
       layer.revision++;
     }
     this.adventure.prepare();return this.rooms[id];
@@ -85,7 +102,7 @@ export class WordPassages {
     return counts;
   }
   track(word: string): boolean { if (!/^[A-Z]{1,16}$/.test(word)) return false; this.tracked = word; return true; }
-  hint(): boolean { if (this.room.hint) return true; if (this.lab.resources < RULE.hintCost) return false; this.lab.resources -= RULE.hintCost;this.adventure.consumeMaterials(RULE.hintCost); this.room.hint = true; return true; }
+  hint(): boolean { if (this.room.hint) return true; if (!this.room.answer || this.lab.resources < RULE.hintCost) return false; this.lab.resources -= RULE.hintCost;this.adventure.consumeMaterials(RULE.hintCost); this.room.hint = true; return true; }
   letterHint(): boolean {
     if (this.room.letterHint) return true;
     if (!this.room.answer || this.lab.resources < RULE.letterHintCost) return false;
@@ -126,7 +143,7 @@ export class WordPassages {
       this.room.chests.push(index); this.coins += Math.round(RULE.chestCoins * result.rewardMultiplier);
       this.lab.layer().revision++;
       const p=this.services.find(p=>p.id==='chest'+index)!;
-      this.adventure.record(session.question.word,result.correct,p.x,p.y,this.lab.depth);
+      this.adventure.record(session.question.word,result.correct,p.x,p.y,this.lab.depth,result.attemptsUsed>1);
       this.lab.effects.push({kind:'chest',x:p.x,y:p.y,depth:this.lab.depth});
       for (let i = 0; i < RULE.chestLetters; i++) {
         const h = hashCoords(314159, index, this.drops++, this.lab.depth, 614), needed = Object.keys(this.needs());
@@ -136,6 +153,58 @@ export class WordPassages {
     }
     return { opened: result.opened, correct: result.correct, letters, word: session.question.word };
   }
+  grantWorldChestLetters(x: number, y: number, depth: number): string {
+    let letters = '';
+    for (let i = 0; i < RULE.worldChestLetters; i++) {
+      const h = hashCoords(314159, x * 31 + y, this.drops++, depth, 619), needed = Object.keys(this.needs());
+      const c = needed.length && (h % 1000) / 1000 < RULE.shortageChance ? needed[h % needed.length] : LETTER_WEIGHTS[h % LETTER_WEIGHTS.length];
+      this.letters[c]++; letters += c;
+    }
+    return letters;
+  }
+  liftProgress(depth = this.lab.depth): { repaired: boolean; cleared: number; requiredClear: number; materialsNeeded: number } {
+    return {
+      repaired: this.repairedLifts.includes(depth),
+      cleared: this.liftCleared[String(depth)] ?? 0,
+      requiredClear: LAB_LIFT_RULES.clearSteps,
+      materialsNeeded: LAB_LIFT_RULES.repairMaterials,
+    };
+  }
+  clearLiftTrack(depth = this.lab.depth): boolean {
+    if (this.repairedLifts.includes(depth)) return false;
+    const id = String(depth), cur = this.liftCleared[id] ?? 0;
+    if (cur >= LAB_LIFT_RULES.clearSteps) return false;
+    this.liftCleared[id] = cur + 1;
+    return true;
+  }
+  repairLift(depth = this.lab.depth): boolean {
+    if (this.repairedLifts.includes(depth)) return true;
+    const id = String(depth);
+    if ((this.liftCleared[id] ?? 0) < LAB_LIFT_RULES.clearSteps || this.lab.resources < LAB_LIFT_RULES.repairMaterials) return false;
+    this.lab.resources -= LAB_LIFT_RULES.repairMaterials;
+    this.adventure.consumeMaterials(LAB_LIFT_RULES.repairMaterials);
+    this.repairedLifts.push(depth);
+    this.repairedLifts.sort((a, b) => a - b);
+    delete this.liftCleared[id];
+    this.lab.layer(depth).revision++;
+    return true;
+  }
+  nearestRepairedDistance(depth = this.lab.depth): number {
+    let best = depth;
+    for (const d of this.repairedLifts) if (d <= depth) best = Math.min(best, depth - d);
+    return best;
+  }
+  canLiftTo(targetDepth: number): boolean {
+    const cur = this.lab.depth;
+    if (targetDepth === cur || !this.repairedLifts.includes(cur) || !this.repairedLifts.includes(targetDepth)) return false;
+    if (targetDepth < cur) return true;
+    for (let d = cur; d < targetDepth; d++) if (!this.lab.canDescend(d)) return false;
+    return true;
+  }
+  rideLift(targetDepth: number): boolean {
+    if (!this.canLiftTo(targetDepth)) return false;
+    return this.lab.warpTo(targetDepth, targetDepth === 0 ? 4 : 10, 6);
+  }
   submit(word: string): boolean {
     const r = this.room;
     if (!word || word !== r.answer || r.opened || Object.keys(this.needs(word)).length || this.lab.travel) return false;
@@ -143,16 +212,16 @@ export class WordPassages {
     if (Math.hypot(p.x + 0.5 - this.lab.walk.x, p.y + 0.5 - this.lab.walk.y) > 1.65) return false;
     for (const c of word) this.letters[c]--;
     this.correct[word] = (this.correct[word] ?? 0) + 1; r.opened = true;
-    this.adventure.record(word,true,p.x,p.y,this.lab.depth);
+    this.adventure.record(word,true,p.x,p.y,this.lab.depth,false);
     this.lab.openPassage(p.x, p.y); return true;
   }
   snapshot(): string {
-    return JSON.stringify({ version: 4, depth: this.lab.depth, maxDepth: this.lab.maxDepth, resources: this.lab.resources, x: this.lab.walk.x, y: this.lab.walk.y,
-      layers: Array.from(this.lab.layers.values()), letters: this.letters, seen: this.seen, correct: this.correct, rooms: this.rooms, tracked: this.tracked, coins: this.coins, drops: this.drops, legacyDepth:this.legacyDepth, adventure:this.adventure.snapshot() });
+    return JSON.stringify({ version: 5, depth: this.lab.depth, maxDepth: this.lab.maxDepth, resources: this.lab.resources, x: this.lab.walk.x, y: this.lab.walk.y,
+      layers: Array.from(this.lab.layers.values()), letters: this.letters, seen: this.seen, correct: this.correct, rooms: this.rooms, tracked: this.tracked, coins: this.coins, drops: this.drops, legacyDepth:this.legacyDepth, repairedLifts:this.repairedLifts, liftCleared:this.liftCleared, adventure:this.adventure.snapshot() });
   }
   restore(raw: string): void {
     const s = JSON.parse(raw), integer = (v: unknown, max = 1000000): boolean => Number.isInteger(v) && Number(v) >= 0 && Number(v) <= max;
-    if (!s || ![1,2,3,4].includes(s.version) || !integer(s.depth, 10000) || !integer(s.maxDepth, 10000) || s.maxDepth < s.depth || !integer(s.resources) || !integer(s.coins) || !integer(s.drops) || !Number.isFinite(s.x) || !Number.isFinite(s.y)) throw Error('实验存档头部无效');
+    if (!s || ![1,2,3,4,5].includes(s.version) || !integer(s.depth, 10000) || !integer(s.maxDepth, 10000) || s.maxDepth < s.depth || !integer(s.resources) || !integer(s.coins) || !integer(s.drops) || !Number.isFinite(s.x) || !Number.isFinite(s.y)) throw Error('实验存档头部无效');
     const record = (v: unknown) => v !== null && typeof v === 'object' && !Array.isArray(v);
     if (!Array.isArray(s.layers) || !s.layers.length || s.layers.length > 10002 || !record(s.rooms) || !record(s.letters) || !record(s.correct)) throw Error('实验存档结构无效');
     const layers = new Map<number, LabLayer>();
@@ -200,11 +269,23 @@ export class WordPassages {
       const skipPart=candidate.expanded||candidate.relics.some(r=>r.kind==='pack_part');
       for(const layer of layers.values())addLabChambers(layer,layer.depth===s.depth?{x:s.x,y:s.y}:undefined,skipPart);
     }
+    let repairedLifts: number[] = [0];
+    let liftCleared: Record<string, number> = {};
+    if (s.version >= 5) {
+      if (!Array.isArray(s.repairedLifts) || !s.repairedLifts.includes(0) || new Set(s.repairedLifts).size !== s.repairedLifts.length || s.repairedLifts.some((d: unknown) => !integer(d, 10000))) throw Error('升降站列表无效');
+      if (!record(s.liftCleared)) throw Error('升降站修复进度无效');
+      for (const [k, v] of Object.entries(s.liftCleared)) if (!/^\d+$/.test(k) || !integer(v, LAB_LIFT_RULES.clearSteps)) throw Error('升降站清理进度无效');
+      repairedLifts = [...(s.repairedLifts as number[])].sort((a, b) => a - b);
+      liftCleared = { ...(s.liftCleared as Record<string, number>) };
+    }
+    if(s.version===1&&s.resources>0&&!Object.entries(candidate.game.inventory).some(([k,v])=>k!=='coin'&&v>0))candidate.game.inventory.stone=s.resources;
     this.adventure.game=candidate.game;this.adventure.book=candidate.book;this.adventure.chestRecords=candidate.chestRecords;
-    this.adventure.capacity=candidate.capacity;this.adventure.expanded=candidate.expanded;this.adventure.relics=candidate.relics;this.adventure.relicDex=candidate.relicDex;
-    this.adventure.quiz=null;this.adventure.drops=[];this.adventure.pendingLoot=null;
+    this.adventure.capacity=candidate.capacity;this.adventure.expanded=candidate.expanded;this.adventure.lampLevel=candidate.lampLevel;this.adventure.pickLevel=candidate.pickLevel;
+    this.adventure.relics=candidate.relics;this.adventure.relicDex=candidate.relicDex;
+    this.adventure.quiz=null;this.adventure.drops=[];this.adventure.pendingLoot=candidate.pendingLoot;
     this.legacyDepth=s.version===1?s.maxDepth:s.legacyDepth;
-    this.lab.layers = layers; this.lab.depth = s.depth; this.lab.maxDepth = s.maxDepth; this.lab.resources = s.resources;
+    this.repairedLifts=repairedLifts;this.liftCleared=liftCleared;
+    this.lab.layers = layers; this.lab.depth = s.depth; this.lab.maxDepth = s.maxDepth; this.lab.resources = s.resources; this.lab.digSpeed = this.adventure.pickSpeed();
     this.lab.walk.x = s.x; this.lab.walk.y = s.y; this.lab.walk.stop(); this.lab.target = null; this.lab.travel = null; this.lab.effects = [];
     this.letters = Object.fromEntries(Array.from(LETTERS, c => [c,s.letters[c]])); this.seen = s.seen; this.correct = s.correct;
     this.rooms = s.rooms; this.tracked = s.tracked; this.coins = s.coins; this.drops = s.drops;

@@ -208,7 +208,8 @@ export class Expedition {
     if (!quiz) return "";
     const result = quiz.session.answer(index);
     if (!result.opened) return "再想想，还剩 " + (3 - result.attemptsUsed) + " 次机会";
-    const outcome = this.book.recordAnswer(quiz.entry.word, result.correct, quiz.z);
+    const hadMistake = result.attemptsUsed > 1;
+    const outcome = this.book.recordAnswer(quiz.entry.word, result.correct, quiz.z, hadMistake);
     let reward = 0;
     if (!quiz.stubborn || result.correct) {
       setDiff(this.slot.game, quiz.x, quiz.y, quiz.z, "dug");
@@ -217,7 +218,7 @@ export class Expedition {
       addItem(this.slot.game, "coin", reward);
       this.effect("chest", quiz.x, quiz.y, quiz.stubborn ? "stubborn" : "chest");
     }
-    if (!result.correct && outcome.stubbornDepth) placeStubborn(this.slot.game, quiz.x, quiz.y, outcome.stubbornDepth, quiz.entry.word);
+    if ((!result.correct || hadMistake) && outcome.stubbornDepth) placeStubborn(this.slot.game, quiz.x, quiz.y, outcome.stubbornDepth, quiz.entry.word);
     this.message = quiz.entry.word + " = " + quiz.entry.meaning + " · +" + reward + " 金币";
     this.slot.game.mastery = this.book.serialize();
     this.quiz = null;
